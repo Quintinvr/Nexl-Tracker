@@ -4,13 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.0.0";
+  const VERSION = "1.1.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
-  const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [] };
+  const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes };
   let settings = { ...defaults };
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch (e) { /* storage unavailable */ }
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
@@ -94,12 +95,13 @@
       const tracking = await NexlClient.getTracking();
       const nexl = { instructions, containers, tracking };
 
-      let res = NexlMatcher.compare(usable, nexl);
+      const mopts = { now: new Date(), notStartedMinutes: settings.notStarted, stuckMinutes: settings.stuck };
+      let res = NexlMatcher.compare(usable, nexl, mopts);
       const unknown = [...new Set(res.issues.filter((i) => i.field === "container" && i.sheet && !i.nexl).map((i) => i.container))].slice(0, 25);
       if (unknown.length) {
         progress(0.9, `Searching Nexl for ${unknown.length} unknown container(s)…`);
         nexl.search = await NexlClient.searchContainers(unknown);
-        res = NexlMatcher.compare(usable, nexl);
+        res = NexlMatcher.compare(usable, nexl, mopts);
       }
 
       const now = new Date();
@@ -118,6 +120,18 @@
           tabWarnings.push(`Couldn't update the ${esc(CFG.checkTabName)} tab (${esc(e.message)}). The panel is still up to date.`);
         }
       }
+      if (settings.statusCols && res.rowStatus.length) {
+        progress(0.97, "Updating NEXL STEP / NEXL ALERT columns…");
+        try { await ExcelIO.writeStatusColumns(CFG, res.rowStatus); }
+        catch (e) { tabWarnings.push(`Couldn't update the status columns (${esc(e.message)}).`); }
+      }
+      if (settings.notes) {
+        progress(0.98, "Updating cell notes…");
+        try {
+          const n = await ExcelIO.syncNotes(CFG, res.issues, fmtTime(now));
+          if (!n.supported) $("notesHint").hidden = false;
+        } catch (e) { tabWarnings.push(`Couldn't update cell notes (${esc(e.message)}).`); }
+      }
       if (tabWarnings.length) banner(tabWarnings.join("<br>"), "warn");
     } catch (e) {
       banner(errorMessage(e));
@@ -131,7 +145,7 @@
 
   // ---------- rendering ----------
   const FIELD = { container: "Container", instruction: "Instruction", seal: "Seal", booking: "Booking ref", loadRef: "Load ref",
-    vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
+    vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver", progress: "Now" };
 
   function render() {
     const res = state.result;
@@ -169,7 +183,7 @@
         <dl class="vals">
           <dt>Instr.</dt><dd class="mono">${esc(i.instruction)}</dd>
           <dt>Container</dt><dd class="mono">${esc(i.container)}</dd>
-          ${i.field !== "container" ? `<dt>${esc(FIELD[i.field] || i.field)}</dt><dd>sheet <b>${esc(i.sheet || "—")}</b> · Nexl <b>${esc(i.nexl || "—")}</b></dd>` : ""}
+          ${i.field === "progress" ? `<dt>Now</dt><dd>${esc(i.nexl)}</dd>` : i.field !== "container" ? `<dt>${esc(FIELD[i.field] || i.field)}</dt><dd>sheet <b>${esc(i.sheet || "—")}</b> · Nexl <b>${esc(i.nexl || "—")}</b></dd>` : ""}
         </dl></div>`;
     }).join("") + (list.length > 400 ? `<p class="empty">…and ${list.length - 400} more (see the ${esc(CFG.checkTabName)} tab).</p>` : "");
     el.querySelectorAll(".card").forEach((c) => c.addEventListener("click", () => ExcelIO.goTo(list[+c.dataset.k].ref).catch(() => {})));
@@ -217,7 +231,8 @@
           const track = t ? [t.route, t.pickup && "Pick-up " + t.pickup, t.via && "Via " + t.via, t.dropoff && "Drop-off " + t.dropoff, t.lastPing && "Last ping " + t.lastPing + " ago"].filter(Boolean).join(" · ") : "";
           return `<div class="crow" data-k="${k}">
             <span class="mono">${esc(c.container)}${c.id !== g.base ? ` <span class="muted">(${esc(c.id)})</span>` : ""}</span>
-            <span>${c.nexl ? podBadge(n.podStatus) : '<span class="badge err">Not in Nexl</span>'}${bad ? ` <span class="badge err">${bad} issue${bad > 1 ? "s" : ""}</span>` : ""}${!c.sheet ? ' <span class="badge err">Not on sheet</span>' : ""}</span>
+            <span>${c.pending ? '<span class="badge info">Allocated</span>' : c.nexl ? podBadge(n.podStatus) : '<span class="badge err">Not in Nexl</span>'}${bad ? ` <span class="badge err">${bad} issue${bad > 1 ? "s" : ""}</span>` : ""}${!c.sheet ? ' <span class="badge err">Not on sheet</span>' : ""}</span>
+            ${c.step ? `<span class="sub step">🚚 ${esc(c.step)}</span>` : ""}
             ${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
             ${track ? `<span class="sub">📍 ${esc(track)}</span>` : ""}
           </div>`;
@@ -246,6 +261,10 @@
     $("sWriteTab").checked = settings.writeTab;
     $("sWriteInfo").checked = settings.writeInfo;
     $("sRegion").value = settings.region;
+    $("sStatusCols").checked = settings.statusCols;
+    $("sNotes").checked = settings.notes;
+    $("sNotStarted").value = settings.notStarted;
+    $("sStuck").value = settings.stuck;
     $("sTabName").textContent = CFG.checkTabName;
     $("sTabs").innerHTML = CFG.tabs.map((t, k) =>
       `<label><span>${esc(t.name)}</span><input type="checkbox" data-k="${k}" ${settings.disabledTabs.includes(t.name) ? "" : "checked"}></label>`).join("");
@@ -255,6 +274,10 @@
     on("sWriteTab", "change", () => (settings.writeTab = $("sWriteTab").checked));
     on("sWriteInfo", "change", () => (settings.writeInfo = $("sWriteInfo").checked));
     on("sRegion", "change", () => (settings.region = $("sRegion").value));
+    on("sStatusCols", "change", () => (settings.statusCols = $("sStatusCols").checked));
+    on("sNotes", "change", () => (settings.notes = $("sNotes").checked));
+    on("sNotStarted", "change", () => (settings.notStarted = Math.max(5, +$("sNotStarted").value || CFG.notStartedMinutes)));
+    on("sStuck", "change", () => (settings.stuck = Math.max(15, +$("sStuck").value || CFG.stuckMinutes)));
     $("sTabs").addEventListener("change", (e) => {
       const t = CFG.tabs[+e.target.dataset.k];
       settings.disabledTabs = settings.disabledTabs.filter((n) => n !== t.name);

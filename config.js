@@ -15,6 +15,13 @@ window.NEXL_CONFIG = {
   // Name of the tab the add-in writes the discrepancy list to (created if missing).
   checkTabName: "NEXL CHECK",
 
+  // On-sheet indicators (written at the end of each checked tab; your own cells are never changed).
+  statusColumns: { stepHeader: "NEXL STEP", alertHeader: "NEXL ALERT" },
+  // Raise "allocated but not started" when a driver has had the job this long with no pick-up entry.
+  notStartedMinutes: 30,
+  // Raise "stuck" when a truck reached a stop this long ago and hasn't reached the next one.
+  stuckMinutes: 120,
+
   // Header row number on every checked tab.
   headerRow: 1,
 

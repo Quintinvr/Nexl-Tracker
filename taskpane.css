@@ -75,3 +75,4 @@ main { padding: 10px 12px 24px; }
 h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
 .tablist label { display: flex; justify-content: space-between; padding: 3px 0; }
 code { font-size: 11.5px; }
+.crow .sub.step { color: var(--text); }

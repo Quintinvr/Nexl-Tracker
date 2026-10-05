@@ -66,7 +66,11 @@
    * @param sheetTabs [{name, compare:[field], cols:{field: index}, rows:[{row, values:[]}]}]
    * @param nexl {instructions:[instr], containers:{id:[c]}, tracking:[t]}
    */
-  function compare(sheetTabs, nexl) {
+  function compare(sheetTabs, nexl, opts = {}) {
+    const now = opts.now ? new Date(opts.now) : new Date();
+    const notStartedMin = opts.notStartedMinutes ?? 30;
+    const stuckMin = opts.stuckMinutes ?? 120;
+    const rowRecs = []; // every plan row in scope (incl. open slots) -> gets a NEXL STEP / NEXL ALERT
     const search = {}; // compact container -> search results (only for containers we looked up)
     for (const [k, v] of Object.entries(nexl.search || {})) search[compact(k)] = v;
     const instrById = new Map();
@@ -121,10 +125,14 @@
 
         const cont = get(r.values, "container");
         const key = compact(cont);
+        const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))),
+          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g };
+        rowRecs.push(rec);
         if (!key) { g.openSlots++; stats.openSlots++; continue; }
         stats.rowsChecked++;
 
-        const entry = { container: cont, id, sheet: cellRef("container"), nexl: null, tracking: trackByContainer.get(key) || null, issues: [] };
+        const entry = { container: cont, id, sheet: cellRef("container"), nexl: null, tracking: rec.tracking, issues: [], rec };
+        rec.entry = entry;
         g.containers.push(entry);
         const add = (severity, field, sheetVal, nexlVal, message) => {
           const iss = { severity, field, sheet: sheetVal, nexl: nexlVal, message, instruction: id, container: cont, ref: cellRef(field === "container" || field === "instruction" ? field : field) };
@@ -162,7 +170,7 @@
         const instr = instrById.get(hit.instruction) || instrById.get(id) || instrById.get(b) || null;
         entry.instr = instr;
         const before = entry.issues.length;
-        const rowText = new Set(r.values.flatMap((v) => tokens(v, 3)));
+        const rowText = rec.tokens;
 
         for (const f of tab.compare) {
           const sv = get(r.values, f);
@@ -230,11 +238,133 @@
       }
     }
 
+    // ---------- Live progress: link Driver Tracking jobs to plan rows ----------
+    const usedTrack = new Set(rowRecs.filter((r) => r.tracking).map((r) => r.tracking));
+    for (const t of nexl.tracking || []) {
+      if (usedTrack.has(t)) continue;
+      const b = baseInstr(t.instruction || "");
+      if (!groups.has(b)) continue;
+      const tk = compact(t.container);
+      if (tk && !/^PENDING/.test(tk) && rowRecs.some((r) => r.key === tk)) continue;
+      const dt = tokens(t.driver, 3).slice(0, 2);
+      if (!dt.length) continue;
+      const cands = rowRecs.filter((r) => r.base === b && !r.tracking && dt.some((d) => r.tokens.has(d)));
+      // Prefer planned slots without a container, then rows whose Nexl container has no driver match yet.
+      const pick = cands.find((r) => !r.key) || cands[0];
+      if (pick) { pick.tracking = t; usedTrack.add(t); if (pick.entry) pick.entry.tracking = t; }
+      else {
+        const g = groups.get(b);
+        g.containers.push({ container: "Allocated: " + t.driver.split(" ").slice(0, 2).join(" "), id: t.instruction, sheet: null, nexl: null,
+          tracking: t, issues: [], pending: true, step: legStatus(t, null, now, notStartedMin, stuckMin).step });
+      }
+    }
+
+    const rowStatus = [];
+    for (const r of rowRecs) {
+      const n = r.entry ? r.entry.nexl : null;
+      const ls = legStatus(r.tracking, n, now, notStartedMin, stuckMin);
+      const anchor = r.ref("container").col ? r.ref("container") : r.ref("instruction");
+      for (const a of ls.alerts) {
+        const iss = { severity: "warn", field: "progress", sheet: "", nexl: ls.step, message: a, instruction: r.id,
+          container: r.container || (r.tracking ? "(" + r.tracking.driver.split(" ")[0] + ")" : ""), ref: anchor };
+        issues.push(iss);
+        if (r.entry) r.entry.issues.push(iss);
+      }
+      if (r.entry) { r.entry.step = ls.step; }
+      else if (r.tracking) {
+        r.group.containers.push({ container: "Slot: " + r.tracking.driver.split(" ").slice(0, 2).join(" "), id: r.id, sheet: anchor, nexl: null,
+          tracking: r.tracking, issues: issues.filter((i) => i.field === "progress" && i.ref === anchor), pending: true, step: ls.step });
+      }
+      const rowIssues = (r.entry ? r.entry.issues : []).filter((i) => i.severity !== "info" && i.field !== "progress");
+      const parts = rowIssues.map(shortIssue).concat(ls.alerts);
+      let level = "";
+      if (rowIssues.some((i) => i.severity === "error")) level = "error";
+      else if (parts.length) level = "warn";
+      else if (n || r.tracking) level = "ok";
+      rowStatus.push({ tab: r.tab, row: r.row, step: ls.step, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓ OK" : "", level });
+    }
+
     const notOnPlan = [...instrById.values()].filter((i) => !groups.has(i.base));
     const order = { error: 0, warn: 1, info: 2 };
     issues.sort((a, b) => order[a.severity] - order[b.severity] || String(a.instruction).localeCompare(String(b.instruction)));
     const groupList = [...groups.values()].map((g) => ({ ...g, tabs: [...g.tabs] })).sort((a, b) => b.base.localeCompare(a.base));
-    return { issues, groups: groupList, notOnPlan, stats };
+    return { issues, groups: groupList, notOnPlan, stats, rowStatus };
+  }
+
+  const FIELD_SHORT = { seal: "Seal", booking: "Booking ref", loadRef: "Load ref", vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
+  function shortIssue(i) {
+    if (FIELD_SHORT[i.field]) return `${FIELD_SHORT[i.field]} ≠ Nexl (${String(i.nexl).split(" | ")[0]})`;
+    return i.message;
+  }
+
+  /** "202:20:44" -> minutes */
+  function durMin(s) {
+    const m = /^(\d+):(\d{2})(?::(\d{2}))?$/.exec(String(s || "").trim());
+    return m ? +m[1] * 60 + +m[2] : null;
+  }
+  function fmtMin(min) {
+    if (min == null) return "";
+    if (min < 60) return Math.round(min) + "m";
+    const h = Math.floor(min / 60), m = Math.round(min % 60);
+    return h >= 48 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h${String(m).padStart(2, "0")}`;
+  }
+  /** "2026-10-05 07:52" (local time) -> Date */
+  function parseEntry(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(s || ""));
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null;
+  }
+  const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+  /** Route "A(POL) >> B(VIA) >> C(POD)" -> [{name, role}] */
+  function parseRoute(route) {
+    return String(route || "").split(/\s*>>\s*/).map((p) => {
+      const m = /^(.*?)\s*\((POL|VIA|POD)\)\s*$/i.exec(p.trim());
+      return m ? { name: m[1].trim(), role: m[2].toUpperCase() } : { name: p.trim(), role: "" };
+    }).filter((s) => s.name);
+  }
+
+  /**
+   * Where is the truck on its instruction?
+   * Uses Driver Tracking entry times (pick-up / via / via2 / drop-off) against the route stops.
+   */
+  function legStatus(t, n, now, notStartedMin = 30, stuckMin = 120) {
+    const alerts = [];
+    if (t) {
+      const stops = parseRoute(t.route);
+      const times = [];
+      let viaN = 0;
+      for (const s of stops) {
+        if (s.role === "POL") times.push(parseEntry(t.pickup));
+        else if (s.role === "POD") times.push(parseEntry(t.dropoff));
+        else { times.push(parseEntry(viaN === 0 ? t.via : viaN === 1 ? t.via2 : "")); viaN++; }
+      }
+      let last = -1;
+      times.forEach((d, i) => { if (d) last = i; });
+      const legs = Math.max(stops.length - 1, 1);
+      const who = t.driver.split(" ").slice(0, 2).join(" ");
+      if (last < 0) {
+        const jm = durMin(t.jobDuration);
+        const step = `Allocated to ${who}${jm != null ? " " + fmtMin(jm) + " ago" : ""} · not started · first stop: ${stops[0] ? stops[0].name : "?"}`;
+        if (jm != null && jm >= notStartedMin) alerts.push(`Not started: allocated to ${who} ${fmtMin(jm)} ago, no pick-up yet`);
+        return { step, alerts, stage: "allocated" };
+      }
+      const at = stops[last], when = times[last];
+      if (at.role === "POD" || last === stops.length - 1) {
+        return { step: `Delivered at ${at.name} ${hhmm(when)}${n && n.podStatus && !/verified/i.test(n.podStatus) ? " · POD " + n.podStatus : ""}`, alerts, stage: "delivered" };
+      }
+      const next = stops[last + 1];
+      const ageMin = (now - when) / 60000;
+      const step = `Leg ${last + 1}/${legs}: ${at.name} (${hhmm(when)}) → ${next ? next.name : "?"} · ${who}`;
+      if (ageMin >= stuckMin) alerts.push(`Stuck: at ${at.name} since ${hhmm(when)} (${fmtMin(ageMin)}), not at ${next ? next.name : "next stop"} yet`);
+      return { step, alerts, stage: "moving" };
+    }
+    if (n) {
+      if (/complete/i.test(n.moveStatus)) {
+        return { step: `✓ Completed${n.end ? " " + n.end : ""}${n.podStatus && !/verified/i.test(n.podStatus) ? " · POD " + n.podStatus : " · POD verified"}`, alerts, stage: "completed" };
+      }
+      return { step: `${n.moveStatus || "In Nexl"} (not on driver tracking)`, alerts, stage: "other" };
+    }
+    return { step: "", alerts, stage: "" };
   }
 
   /** Map config field patterns to column indexes using the header row. */
@@ -254,5 +384,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch };
+  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin };
 })(typeof window !== "undefined" ? window : globalThis);

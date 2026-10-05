@@ -77,7 +77,7 @@
   const SEV_FILL = { error: "#FFD7D5", warn: "#FFF1C2", info: "#DDEBFF" };
   const SEV_LABEL = { error: "Error", warn: "Check", info: "Info" };
   const FIELD_LABEL = { container: "Container", instruction: "Instruction", seal: "Seal", booking: "Booking ref", loadRef: "Load ref",
-    vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
+    vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver", progress: "Progress" };
 
   let lastSignature = "";
 
@@ -122,5 +122,134 @@
     });
   }
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab };
+  // ---------------------------------------------------------------------------
+  // On-sheet indicators: two status columns at the end of each plan tab + notes on wrong cells.
+  // Only the add-in's own columns and its own notes (text starting "NEXL CHECK") are ever changed.
+  // ---------------------------------------------------------------------------
+  const LEVEL_STYLE = {
+    error: { fill: "#FFC7CE", font: "#9C0006" },
+    warn: { fill: "#FFEB9C", font: "#7F4F00" },
+    ok: { fill: "#C6EFCE", font: "#006100" },
+  };
+  const NOTE_PREFIX = "NEXL CHECK";
+  const colCache = new Map(); // tab -> step column index
+
+  async function findStatusColumns(ctx, ws, cfg) {
+    const H = cfg.headerRow - 1;
+    const head = ws.getRangeByIndexes(H, 0, 1, 120);
+    head.load("values");
+    const used = ws.getUsedRangeOrNullObject(true);
+    used.load("rowIndex,rowCount");
+    await ctx.sync();
+    const heads = head.values[0].map((v) => String(v).trim().toUpperCase());
+    const existing = heads.indexOf(cfg.statusColumns.stepHeader.toUpperCase());
+    if (existing >= 0) return { c: existing, created: false };
+    const lastRow = used.isNullObject ? cfg.headerRow : used.rowIndex + used.rowCount;
+    let c = heads.reduce((last, h, i) => (h ? i : last), -1) + 1;
+    // Skip columns that hold unlabelled data (e.g. IMPORTS P.E column P).
+    for (let tries = 0; tries < 30; tries++, c++) {
+      const probe = ws.getRangeByIndexes(H, c, Math.max(lastRow - H, 1), 2);
+      probe.load("values");
+      await ctx.sync();
+      if (probe.values.every((r) => r[0] === "" && r[1] === "")) return { c, created: true };
+    }
+    throw new Error("Couldn't find two empty columns for the status columns");
+  }
+
+  /**
+   * rowStatus: [{tab,row,step,alert,level}] for every plan row in scope.
+   * Rows not in rowStatus (instructions no longer active in Nexl) keep their last status.
+   */
+  async function writeStatusColumns(cfg, rowStatus) {
+    const byTab = new Map();
+    for (const r of rowStatus) { if (!byTab.has(r.tab)) byTab.set(r.tab, []); byTab.get(r.tab).push(r); }
+    let written = 0;
+    await Excel.run(async (ctx) => {
+      for (const [tab, rows] of byTab) {
+        const ws = ctx.workbook.worksheets.getItem(tab);
+        const { c, created } = await findStatusColumns(ctx, ws, cfg);
+        colCache.set(tab, c);
+        const H = cfg.headerRow - 1;
+        const hdr = ws.getRangeByIndexes(H, c, 1, 2);
+        hdr.values = [[cfg.statusColumns.stepHeader, cfg.statusColumns.alertHeader]];
+        hdr.format.font.bold = true; hdr.format.font.color = "#FFFFFF"; hdr.format.fill.color = "#203864";
+        hdr.format.horizontalAlignment = "Center";
+
+        // Current contents of our two columns for the rows we own, read as one block.
+        const minR = Math.min(...rows.map((r) => r.row)), maxR = Math.max(...rows.map((r) => r.row));
+        const cur = ws.getRangeByIndexes(minR - 1, c, maxR - minR + 1, 2);
+        cur.load("values");
+        await ctx.sync();
+        for (const r of rows) {
+          const old = cur.values[r.row - minR];
+          const want = [r.step || "", r.alert || ""];
+          if (old[0] === want[0] && old[1] === want[1]) continue;
+          const rng = ws.getRangeByIndexes(r.row - 1, c, 1, 2);
+          rng.values = [want];
+          const a = ws.getRangeByIndexes(r.row - 1, c + 1, 1, 1);
+          const st = LEVEL_STYLE[r.level];
+          if (st) { a.format.fill.color = st.fill; a.format.font.color = st.font; }
+          else { a.format.fill.clear(); a.format.font.color = "#000000"; }
+          written++;
+        }
+        if (created) { // only size the columns the first time, so people can resize them
+          ws.getRangeByIndexes(0, c, 1, 1).format.columnWidth = 260;
+          ws.getRangeByIndexes(0, c + 1, 1, 1).format.columnWidth = 300;
+        }
+        await ctx.sync();
+      }
+    });
+    return written;
+  }
+
+  const notesSupported = () => {
+    try { return Office.context.requirements.isSetSupported("ExcelApi", "1.18"); } catch (e) { return false; }
+  };
+
+  /** Adds/updates/removes the add-in's own notes. issues: those with ref.col on a plan tab. */
+  async function syncNotes(cfg, issues, stamp) {
+    if (!notesSupported()) return { supported: false };
+    const want = new Map(); // "tab|A1" -> text
+    for (const i of issues) {
+      if (!i.ref || !i.ref.col || i.severity === "info" || i.field === "progress") continue;
+      const k = `${i.ref.tab}|${i.ref.col}${i.ref.row}`;
+      const line = i.nexl && i.field !== "container" ? `${i.message}. Nexl has: ${String(i.nexl).split(" | ")[0]}` : i.message;
+      want.set(k, want.has(k) ? want.get(k) + "\n• " + line : `${NOTE_PREFIX} (${stamp}):\n• ${line}`);
+    }
+    const tabs = [...new Set(cfg.tabs.map((t) => t.name))];
+    let added = 0, removed = 0;
+    await Excel.run(async (ctx) => {
+      for (const tab of tabs) {
+        const ws = ctx.workbook.worksheets.getItemOrNullObject(tab);
+        await ctx.sync();
+        if (ws.isNullObject) continue;
+        const notes = ws.notes;
+        notes.load("items/content");
+        await ctx.sync();
+        const locs = notes.items.map((n) => { const l = n.getLocation(); l.load("address"); return { n, l }; });
+        await ctx.sync();
+        const existing = new Map(); // A1 -> {note, ours}
+        for (const { n, l } of locs) {
+          const a1 = l.address.split("!").pop().replace(/\$/g, "");
+          existing.set(a1, { n, ours: String(n.content || "").startsWith(NOTE_PREFIX) });
+        }
+        for (const [a1, e] of existing) {
+          if (!e.ours) continue;
+          const text = want.get(`${tab}|${a1}`);
+          if (!text) { e.n.delete(); removed++; }
+          else if (e.n.content.replace(/\(.*?\)/, "") !== text.replace(/\(.*?\)/, "")) e.n.content = text;
+        }
+        for (const [k, text] of want) {
+          const [t, a1] = k.split("|");
+          if (t !== tab || existing.has(a1)) continue; // never touch someone else's note
+          ws.notes.add(ws.getRange(a1), text);
+          added++;
+        }
+        await ctx.sync();
+      }
+    });
+    return { supported: true, added, removed };
+  }
+
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes };
 })(window);

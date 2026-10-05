@@ -10,7 +10,7 @@
 <body>
   <header class="top">
     <div class="brand">
-      <img src="icon-32.png" alt="" width="20" height="20">
+      <img src="assets/icon-32.png" alt="" width="20" height="20">
       <span>Nexl Check</span>
     </div>
     <button id="syncBtn" class="primary" type="button">Sync now</button>
@@ -66,6 +66,11 @@
       <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every <input type="number" id="sMinutes" min="2" max="60" step="1"> min</label>
       <label class="check"><input type="checkbox" id="sWriteTab"> Keep a <b id="sTabName"></b> tab in the workbook</label>
       <label class="check"><input type="checkbox" id="sWriteInfo"> Include info items on that tab</label>
+      <label class="check"><input type="checkbox" id="sStatusCols"> Show <b>NEXL STEP</b> / <b>NEXL ALERT</b> columns on the plan tabs</label>
+      <label class="check"><input type="checkbox" id="sNotes"> Add a note on cells that differ from Nexl</label>
+      <p class="muted small" id="notesHint" hidden>Cell notes need a newer Excel version; the status columns still work.</p>
+      <label class="check">Alert "not started" after <input type="number" id="sNotStarted" min="5" max="600" step="5"> min</label>
+      <label class="check">Alert "stuck at a stop" after <input type="number" id="sStuck" min="15" max="1440" step="15"> min</label>
       <label class="field">Nexl region
         <select id="sRegion">
           <option value="pe">Port Elizabeth</option>
