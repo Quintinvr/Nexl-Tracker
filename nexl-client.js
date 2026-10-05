@@ -105,5 +105,17 @@
     return out;
   }
 
-  root.NexlClient = { ping, openInNexl, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
+  /** Upload Viewer HTML for one container row (lists the driver's photos). */
+  function getUploads(rowId) {
+    if (!/^\d+$/.test(String(rowId))) return Promise.reject(new NexlError("NO_ROW", "No Nexl row id for this container"));
+    return get(`/php/ajax/document_viewer/get.viewer.php?p_prog=${rowId}`);
+  }
+  /** One uploaded photo as a (resized) data URL. Needs bridge 1.2+. */
+  async function getImage(path) {
+    const r = await send("image", String(path).replace(/^https?:\/\/[^/]+/, ""), 45000);
+    if (!r.ok) throw new NexlError(r.error || "FAILED", r.error === "UNKNOWN_REQUEST" ? "Update the Nexl Check Bridge extension to 1.2 to check photos" : r.detail);
+    return r.dataUrl;
+  }
+
+  root.NexlClient = { ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
 })(window);

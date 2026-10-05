@@ -84,8 +84,10 @@
       .map((r) => {
         const container = r["CONTAINER"] || "";
         if (!container) return null;
+        const rid = /container_table_row_(\d+)/.exec((r.__tr && r.__tr.id) || "");
         return {
           instruction: normInstr(instrId),
+          rowId: rid ? rid[1] : "",
           container,
           seal: r["SEAL"] || "",
           ref2: r["REFERENCE 2"] || "",

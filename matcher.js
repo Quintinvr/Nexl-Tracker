@@ -155,7 +155,11 @@
             add("error", "instruction", id, elsewhere.instruction, `Nexl has this container on instruction ${elsewhere.instruction}`);
           } else if (searched && searched.length) {
             const latest = [...searched].sort((x, y) => parseFloat(y.instruction) - parseFloat(x.instruction))[0];
-            add("error", "container", cont, "", `Not on this instruction in Nexl. Latest Nexl record: ${latest.instruction} (${latest.customer}, ${latest.status || "?"})`);
+            // Nexl's search "Status" says "Invoiced" once a file reaches finance; that isn't reliable (the Invoice Sent
+            // Yes/No column is), so it's left out of the description.
+            const st = /invoic/i.test(latest.status || "") ? "" : latest.status;
+            const info = [latest.customer, st].filter(Boolean).join(", ");
+            add("error", "container", cont, "", `Not on this instruction in Nexl. Latest Nexl record: ${latest.instruction}${info ? ` (${info})` : ""}`);
           } else if (searched) {
             add("error", "container", cont, "", "Container not found anywhere in Nexl");
           } else {
@@ -264,6 +268,27 @@
     const rowStatus = [], fills = [], rows = {};
     const sheetKeys = new Set(rowRecs.map((r) => r.key).filter(Boolean));
     const X = extrasContext(rowRecs, nexl, instrById, nexlByContainer, now, opts);
+
+    // Container number the driver entered in the app, for a planned slot that has no container yet.
+    // Each Nexl container is offered to one slot only; every offer must be photo-checked before Apply.
+    const claimed = new Set();
+    const realNexl = (n) => n && n.key && !/^PENDING/.test(n.key) && !sheetKeys.has(n.key) && !claimed.has(n);
+    const slotsByBase = new Map();
+    for (const r of rowRecs) if (!r.key) slotsByBase.set(r.base, (slotsByBase.get(r.base) || 0) + 1);
+    function slotContainer(r) {
+      const pool = (nexlByBase.get(r.base) || []).filter((n) => !n.used && realNexl(n));
+      if (r.tracking) {
+        const tc = compact(r.tracking.container);
+        if (tc && !/^PENDING/.test(tc) && !sheetKeys.has(tc)) {
+          const n = pool.find((x) => x.key === tc) || (nexlByContainer.get(tc) || []).find(realNexl) || null;
+          if (!claimed.has(n || tc)) return { value: n ? n.container : r.tracking.container, n, key: tc, source: "tracking" };
+        }
+      }
+      const byDriver = pool.filter((n) => tokens(n.driver, 3).slice(0, 2).some((t) => r.tokens.has(t)));
+      if (byDriver.length === 1) return { value: byDriver[0].container, n: byDriver[0], source: "driver" };
+      if (pool.length === 1 && slotsByBase.get(r.base) === 1 && !tokens(pool[0].driver, 3).length) return { value: pool[0].container, n: pool[0], source: "only" };
+      return null;
+    }
     for (const r of rowRecs) {
       const n = r.entry ? r.entry.nexl : null;
       const ls = legStatus(r.tracking, n, now, notStartedMin, stuckMin);
@@ -296,9 +321,16 @@
         if (r.compare.includes("driver")) addFill("driver", (n.driver || "").split(" ")[0]);
         if (r.compare.includes("transporter")) addFill("transporter", (n.owner || "").split(" ")[0]);
       } else if (!r.key && r.tracking) {
-        const tc = compact(r.tracking.container);
-        if (tc && !/^PENDING/.test(tc) && !sheetKeys.has(tc)) addFill("container", r.tracking.container);
         addFill("driver", r.tracking.driver.split(" ")[0]);
+      }
+      if (!r.key && blank("container")) {
+        const c = slotContainer(r);
+        if (c) {
+          claimed.add(c.n || c.key);
+          const before = rowFills.length;
+          addFill("container", c.value);
+          if (rowFills.length > before) Object.assign(rowFills[rowFills.length - 1], { nexlRowId: c.n ? c.n.rowId || "" : "", needsPhoto: true, source: c.source });
+        }
       }
 
       const rowIssues = (r.entry ? r.entry.issues : []).filter((i) => i.severity !== "info" && i.field !== "progress").concat(progressIssues);

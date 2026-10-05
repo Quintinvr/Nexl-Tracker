@@ -205,3 +205,14 @@ input.full { font-family: inherit; font-size: 13px; }
 .wa .wa-msg { margin-top: 8px; }
 .detail.off { display: none !important; }
 .tabs button { padding: 8px 7px; white-space: nowrap; }
+
+/* container photo check */
+.fill.photo { padding: 4px 0; border-top: 1px dashed var(--line, #ddd); }
+.nocb { width: 13px; font-size: 11px; opacity: .7; }
+.pbadge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 9px; margin: 2px 0; }
+.pbadge.ok { background: #C6EFCE; color: #006100; } .pbadge.bad { background: #FFC7CE; color: #9C0006; }
+.pbadge.warn { background: #FFEB9C; color: #7a5b00; } .pbadge.chk { background: #e8eef7; color: #2b4a75; }
+button.link { background: none; border: 0; color: #2f6fd6; text-decoration: underline; cursor: pointer; padding: 0 2px; font-size: 11px; }
+.dphoto { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; margin: 6px 0; }
+.dphoto .thumb { width: 84px; height: 64px; object-fit: cover; border-radius: 6px; cursor: zoom-in; border: 1px solid #ccc; }
+.cphoto { width: 100%; max-height: 55vh; object-fit: contain; border-radius: 6px; background: #111; }

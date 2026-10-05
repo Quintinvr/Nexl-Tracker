@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.3.1";
+  const VERSION = "1.4.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -19,7 +19,7 @@
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
 
   // ---------- state ----------
-  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(),
+  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(),
     extras: {}, waGrid: null, waUnticked: new Set(), waEdits: {} };
   const fmtTime = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const fmtStamp = (d) => d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -147,6 +147,7 @@
       $("lastSync").textContent = "Synced " + fmtTime(now);
       render();
       hideSplash();
+      runPhotoChecks();
 
       if (settings.writeTab) {
         progress(0.96, `Updating ${CFG.checkTabName} tab…`);
@@ -229,6 +230,9 @@
   }
 
   async function doFill(list) {
+    const blocked = list.filter((f) => !fillAllowed(f));
+    list = list.filter(fillAllowed);
+    if (blocked.length) toast(`${blocked.length} container number(s) skipped: photo not confirmed yet.`);
     if (!list.length) return;
     try {
       const r = await ExcelIO.fillBlanks(list);
@@ -241,6 +245,68 @@
   // ---------- rendering ----------
   const FIELD = { container: "Container", instruction: "Instruction", seal: "Seal", booking: "Booking ref", loadRef: "Load ref",
     vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver", progress: "Now" };
+
+  // ---------- container photo check ----------
+  // A container number from the Nexl app is only offered with "Apply" once the driver's
+  // CONTAINER photo in Nexl has been read and shows the same number.
+  const photoKey = (f) => `${f.nexlRowId || "-"}|${f.value}`;
+  const photoOf = (f) => (f.needsPhoto ? state.photo.get(photoKey(f)) || { status: "checking" } : null);
+  const fillAllowed = (f) => !f.needsPhoto || photoOf(f).status === "match";
+  const PHOTO_BADGE = {
+    checking: ["⏳", "Checking photo…", "chk"], match: ["✓", "Photo matches", "ok"], mismatch: ["✗", "Photo shows a different number", "bad"],
+    unreadable: ["?", "Photo unclear — check by eye", "warn"], invalid: ["✗", "App number looks mistyped", "bad"],
+    nophoto: ["📷", "No container photo yet", "warn"], norow: ["?", "Can't find this container's photos in Nexl", "warn"], error: ["!", "Photo check failed", "warn"],
+  };
+  function photoBadge(f) {
+    const p = photoOf(f); if (!p) return "";
+    const [ic, txt, cls] = PHOTO_BADGE[p.status] || PHOTO_BADGE.error;
+    return `<span class="pbadge ${cls}" title="${esc(p.detail || txt)}">${ic} ${esc(txt)}</span>`;
+  }
+  function runPhotoChecks() {
+    if (!state.result || !window.NexlPhotoCheck) return;
+    for (const f of state.result.fills) {
+      if (!f.needsPhoto) continue;
+      const k = photoKey(f);
+      if (state.photo.has(k)) continue;
+      if (!f.nexlRowId) { state.photo.set(k, { status: "norow", detail: "Nexl didn't give a row for this container, so its photos can't be opened" }); continue; }
+      state.photo.set(k, { status: "checking" });
+      NexlPhotoCheck.check(f).then((r) => {
+        state.photo.set(k, r);
+        if (r.status === "error") setTimeout(() => state.photo.get(k) === r && state.photo.delete(k), 60000); // retry on a later sync
+        renderFills();
+        if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
+      });
+    }
+  }
+  function showPhoto(f) {
+    const p = photoOf(f) || {};
+    modal(`Photo · ${f.value}`, `${p.photo ? `<img class="cphoto" src="${esc(p.photo)}" alt="Container photo">` : `<p class="small">No photo loaded.</p>`}
+      <p class="small">${photoBadge(f)}</p><p class="small">${esc(p.detail || "")}</p>
+      <p class="small muted">App number: <span class="mono">${esc(f.value)}</span>${p.seen ? ` · read on photo: <span class="mono">${esc(p.seen)}</span>` : ""}</p>
+      <div class="row-actions">${fillAllowed(f) ? `<button id="phApply" class="primary small-btn" type="button">Apply to ${esc(f.tab)} ${esc(f.col + f.row)}</button>` : ""}
+      <button id="phNexl" class="ghost small-btn" type="button">Open in Nexl ↗</button></div>`);
+    if ($("phApply")) $("phApply").onclick = () => { closeModal(); doFill([f]); };
+    $("phNexl").onclick = () => openNexl(f.instruction, "instruction");
+  }
+  function renderFills() {
+    const res = state.result; if (!res) return;
+    const fills = res.fills;
+    $("fillBox").hidden = !fills.length;
+    $("nFill").textContent = fills.length;
+    $("fillList").innerHTML = fills.map((f, k) => {
+      const ok = fillAllowed(f);
+      if (!ok) state.fillSel.delete(k);
+      const p = photoOf(f);
+      return `<div class="fill ${f.needsPhoto ? "photo" : ""}">${ok ? `<input type="checkbox" data-k="${k}" ${state.fillSel.has(k) ? "checked" : ""}>` : `<span class="nocb">🔒</span>`}
+      <span><b>${esc(f.tab)} ${esc(f.col + f.row)}</b> · ${esc(FIELD[f.field] || f.field)} ← <span class="mono">${esc(f.value)}</span>
+      <span class="muted">(${esc(f.instruction)} ${esc(f.container || "")})</span>
+      ${f.needsPhoto ? `<br>${photoBadge(f)} ${p && p.photo ? `<button class="link xs" data-ph="${k}" type="button">View photo</button>` : ""}
+        ${ok ? `<button class="primary xs" data-apply="${k}" type="button">Apply</button>` : ""}` : ""}</span></div>`;
+    }).join("");
+    $("fillList").querySelectorAll("input").forEach((cb) => cb.onchange = () => { const k = +cb.dataset.k; cb.checked ? state.fillSel.add(k) : state.fillSel.delete(k); });
+    $("fillList").querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(fills[+b.dataset.ph])));
+    $("fillList").querySelectorAll("[data-apply]").forEach((b) => (b.onclick = () => doFill([fills[+b.dataset.apply]])));
+  }
 
   function render() {
     const res = state.result;
@@ -329,14 +395,7 @@
     nl.innerHTML = need.length ? need.slice(0, 150).map((i, k) => issueCard(i, k, { compact: true })).join("") : `<p class="empty ok">✓ Nothing needs attention right now.</p>`;
     wireCards(nl, need);
 
-    // Fill blanks
-    const fills = res.fills;
-    $("fillBox").hidden = !fills.length;
-    $("nFill").textContent = fills.length;
-    $("fillList").innerHTML = fills.map((f, k) => `<label class="fill"><input type="checkbox" data-k="${k}" ${state.fillSel.has(k) ? "checked" : ""}>
-      <span><b>${esc(f.tab)} ${esc(f.col + f.row)}</b> · ${esc(FIELD[f.field] || f.field)} ← <span class="mono">${esc(f.value)}</span>
-      <span class="muted">(${esc(f.instruction)} ${esc(f.container || "")})</span></span></label>`).join("");
-    $("fillList").querySelectorAll("input").forEach((cb) => cb.onchange = () => { const k = +cb.dataset.k; cb.checked ? state.fillSel.add(k) : state.fillSel.delete(k); });
+    renderFills();
 
     // On the road
     const road = Object.values(res.rows).filter((d) => d.leg.stage === "moving" || d.leg.stage === "allocated")
@@ -525,7 +584,12 @@
         ${t && t.lastPing ? `<dt>Last ping</dt><dd>${esc(t.lastPing)} ago</dd>` : ""}
       </dl>
       ${issues.length ? `<div class="dissues">${issues.map((i) => `<div class="di ${i.ack ? "acked" : i.severity}">${esc(i.ack ? "👀 " + i.ack.by + ": " : "")}${esc(i.message)}</div>`).join("")}</div>` : ""}
-      ${d.fills.length ? `<div class="dfills">${d.fills.map((f, k) => `<button class="ghost xs" data-fill="${k}">Fill ${esc(FIELD[f.field] || f.field)} ← ${esc(f.value)}</button>`).join("")}</div>` : ""}
+      ${d.fills.length ? `<div class="dfills">${d.fills.map((f, k) => f.needsPhoto
+        ? `<div class="dphoto">${photoOf(f).photo ? `<img class="thumb" data-ph="${k}" src="${esc(photoOf(f).photo)}" alt="Container photo" title="Click to enlarge">` : ""}
+           <div>App container: <span class="mono">${esc(f.value)}</span><br>${photoBadge(f)}<br>
+           ${fillAllowed(f) ? `<button class="primary xs" data-fill="${k}" type="button">Apply to ${esc(f.col + f.row)}</button>` : `<span class="muted small">Apply unlocks once the photo matches.</span>`}
+           ${photoOf(f).photo ? ` <button class="link xs" data-ph="${k}" type="button">View photo</button>` : ""}</div></div>`
+        : `<button class="ghost xs" data-fill="${k}">Fill ${esc(FIELD[f.field] || f.field)} ← ${esc(f.value)}</button>`).join("")}</div>` : ""}
       <div class="row-actions">
         <button class="primary small-btn" id="dNexl" type="button">Open in Nexl ↗</button>
         ${issues.some((i) => !i.ack) ? `<button class="ghost small-btn" id="dSnooze" type="button">👀 I'm on it</button>` : ""}
@@ -534,6 +598,7 @@
     $("dNexl").onclick = () => openNexl(word, d.container ? "container" : "instruction");
     if ($("dSnooze")) $("dSnooze").onclick = async () => { for (const i of issues.filter((x) => !x.ack)) await snooze(i); };
     box.querySelectorAll("[data-fill]").forEach((b) => (b.onclick = () => doFill([d.fills[+b.dataset.fill]])));
+    box.querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(d.fills[+b.dataset.ph])));
     if (!quiet) box.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
@@ -599,7 +664,7 @@
     $("fTab").addEventListener("change", renderIssues);
     $("liveSearch").addEventListener("input", renderLive);
     $("showDone").addEventListener("change", renderLive);
-    $("fillAll").addEventListener("click", () => { (state.result ? state.result.fills : []).forEach((_, k) => state.fillSel.add(k)); renderNow(); });
+    $("fillAll").addEventListener("click", () => { (state.result ? state.result.fills : []).forEach((f, k) => fillAllowed(f) && state.fillSel.add(k)); renderFills(); });
     $("fillSel").addEventListener("click", () => doFill([...state.fillSel].map((k) => state.result.fills[k]).filter(Boolean)));
     document.querySelectorAll(".tile").forEach((t) => t.addEventListener("click", () => {
       const g = t.dataset.go;
