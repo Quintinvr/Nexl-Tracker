@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nexl Check</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icon-32.png" alt="" width="20" height="20">
+      <span>Nexl Check</span>
+    </div>
+    <button id="syncBtn" class="primary" type="button">Sync now</button>
+  </header>
+
+  <div class="statusbar">
+    <span class="pill" id="bridgePill"><i></i><span>Bridge</span></span>
+    <span class="pill" id="nexlPill"><i></i><span>Nexl</span></span>
+    <span class="muted" id="lastSync">Not synced yet</span>
+  </div>
+
+  <div id="banner" class="banner" hidden></div>
+  <div id="progress" class="progress" hidden><div></div><span></span></div>
+
+  <section class="tiles" id="tiles">
+    <button class="tile" data-filter="all"><b id="tChecked">–</b><span>Checked</span></button>
+    <button class="tile ok" data-filter="ok"><b id="tOk">–</b><span>Match</span></button>
+    <button class="tile err" data-filter="error"><b id="tErr">–</b><span>Errors</span></button>
+    <button class="tile warn" data-filter="warn"><b id="tWarn">–</b><span>Check</span></button>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="issues" class="active">Issues</button>
+    <button role="tab" data-view="live">Live Nexl</button>
+    <button role="tab" data-view="settings">Settings</button>
+  </nav>
+
+  <main>
+    <section id="view-issues" class="view">
+      <div class="filters">
+        <select id="fSeverity" aria-label="Severity">
+          <option value="problems">Errors + checks</option>
+          <option value="error">Errors only</option>
+          <option value="warn">Checks only</option>
+          <option value="info">Info only</option>
+          <option value="all">Everything</option>
+        </select>
+        <select id="fTab" aria-label="Tab"><option value="">All tabs</option></select>
+      </div>
+      <div id="issueList" class="list"><p class="empty">Press <b>Sync now</b> to compare the plan with Nexl.</p></div>
+    </section>
+
+    <section id="view-live" class="view" hidden>
+      <input id="liveSearch" type="search" placeholder="Search container, instruction, driver…">
+      <div id="liveList" class="list"></div>
+      <details id="notOnPlan" class="notonplan" hidden>
+        <summary>Nexl instructions not on the checked tabs <span id="nopCount"></span></summary>
+        <div id="nopList"></div>
+      </details>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every <input type="number" id="sMinutes" min="2" max="60" step="1"> min</label>
+      <label class="check"><input type="checkbox" id="sWriteTab"> Keep a <b id="sTabName"></b> tab in the workbook</label>
+      <label class="check"><input type="checkbox" id="sWriteInfo"> Include info items on that tab</label>
+      <label class="field">Nexl region
+        <select id="sRegion">
+          <option value="pe">Port Elizabeth</option>
+          <option value="durban">Durban</option>
+          <option value="ct">Cape Town</option>
+          <option value="all">All regions</option>
+        </select>
+      </label>
+      <h3>Tabs checked</h3>
+      <div id="sTabs" class="tablist"></div>
+      <p class="muted small">Matching key: instruction no. + container no. The add-in only reads your plan tabs and never edits them. Column mapping lives in <code>config.js</code>.</p>
+      <p class="muted small" id="versions"></p>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="nexl-parsers.js"></script>
+  <script src="matcher.js"></script>
+  <script src="nexl-client.js"></script>
+  <script src="excel-io.js"></script>
+  <script src="taskpane.js"></script>
+</body>
+</html>

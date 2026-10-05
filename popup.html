@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; width: 260px; margin: 0; padding: 14px; color: #1f2328; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #aaa; flex: none; }
+  .ok { background: #1a7f37; } .bad { background: #cf222e; }
+  p { color: #59636e; margin: 8px 0 0; font-size: 12px; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+  <h1>Nexl Check Bridge</h1>
+  <div class="row"><span class="dot ok"></span><span>Installed (v<span id="v"></span>)</span></div>
+  <div class="row"><span class="dot" id="nd"></span><span id="nt">Checking Nexl login…</span></div>
+  <p>Read-only. This only lets the Nexl Check add-in in Excel read your Nexl screens.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
