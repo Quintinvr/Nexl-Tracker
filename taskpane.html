@@ -8,12 +8,38 @@
   <link rel="stylesheet" href="taskpane.css">
 </head>
 <body>
+  <!-- ===== Start-up animation ===== -->
+  <div id="splash" class="splash" role="status" aria-live="polite" title="Click to skip">
+    <div class="splash-inner">
+      <div class="logo" aria-label="NeXL">
+        <span class="l l1">N</span><span class="l l2">e</span><span class="l l3">X</span><span class="l l4">L</span>
+        <span class="shine"></span>
+      </div>
+      <div class="sub">CHECK <span>· live tracker</span></div>
+      <svg class="splash-road" viewBox="0 0 260 40" aria-hidden="true">
+        <path class="road-line" d="M10 28 H250" />
+        <circle class="stop s1" cx="10" cy="28" r="5" />
+        <circle class="stop s2" cx="96" cy="28" r="5" />
+        <circle class="stop s3" cx="173" cy="28" r="5" />
+        <circle class="stop s4" cx="250" cy="28" r="5" />
+        <g class="truck">
+          <rect x="-15" y="12" width="17" height="11" rx="1.5" />
+          <path d="M3 15 h6 l4 4 v4 h-10 z" />
+          <circle cx="-10" cy="25" r="2.6" /><circle cx="7" cy="25" r="2.6" />
+        </g>
+      </svg>
+      <div class="splash-status" id="splashStatus">Starting up…</div>
+    </div>
+  </div>
+
   <header class="top">
     <div class="brand">
-      <img src="assets/icon-32.png" alt="" width="20" height="20">
-      <span>Nexl Check</span>
+      <span class="mini-logo">Ne<b>X</b>L</span><span>Check</span>
     </div>
-    <button id="syncBtn" class="primary" type="button">Sync now</button>
+    <div class="top-actions">
+      <button id="handoverBtn" class="ghost" type="button" title="Build a shift handover summary">📋 Handover</button>
+      <button id="syncBtn" class="primary" type="button">Sync now</button>
+    </div>
   </header>
 
   <div class="statusbar">
@@ -26,20 +52,45 @@
   <div id="progress" class="progress" hidden><div></div><span></span></div>
 
   <section class="tiles" id="tiles">
-    <button class="tile" data-filter="all"><b id="tChecked">–</b><span>Checked</span></button>
-    <button class="tile ok" data-filter="ok"><b id="tOk">–</b><span>Match</span></button>
-    <button class="tile err" data-filter="error"><b id="tErr">–</b><span>Errors</span></button>
-    <button class="tile warn" data-filter="warn"><b id="tWarn">–</b><span>Check</span></button>
+    <button class="tile err" data-go="error"><b id="tErr">–</b><span>Errors</span></button>
+    <button class="tile warn" data-go="attention"><b id="tWarn">–</b><span>Attention</span></button>
+    <button class="tile road" data-go="road"><b id="tRoad">–</b><span>On the road</span></button>
+    <button class="tile ok" data-go="jobs"><b id="tOk">–</b><span>Match</span></button>
   </section>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-view="issues" class="active">Issues</button>
-    <button role="tab" data-view="live">Live Nexl</button>
+    <button role="tab" data-view="now" class="active">Now</button>
+    <button role="tab" data-view="issues">All issues</button>
+    <button role="tab" data-view="live">Jobs</button>
     <button role="tab" data-view="settings">Settings</button>
   </nav>
 
   <main>
-    <section id="view-issues" class="view">
+    <!-- Selected row (click a row in Excel) -->
+    <section id="detail" class="detail" hidden></section>
+
+    <section id="view-now" class="view">
+      <h3 class="sec">Needs attention <span id="nNeed" class="count"></span></h3>
+      <div id="needList" class="list"><p class="empty">Press <b>Sync now</b> to compare the plan with Nexl.</p></div>
+
+      <details id="fillBox" class="box" hidden>
+        <summary>✍️ <b id="nFill">0</b> empty cell(s) can be filled from Nexl</summary>
+        <div class="muted small">Only empty cells are filled — nothing you've typed is overwritten.</div>
+        <div id="fillList" class="filllist"></div>
+        <div class="row-actions"><button id="fillSel" class="primary small-btn" type="button">Fill selected</button>
+          <button id="fillAll" class="ghost small-btn" type="button">Select all</button></div>
+      </details>
+
+      <h3 class="sec" id="roadHead">On the road <span id="nRoad" class="count"></span></h3>
+      <div id="roadList" class="list compact"></div>
+
+      <details id="snoozeBox" class="box" hidden>
+        <summary>👀 Snoozed <span id="nSnooze"></span></summary>
+        <div id="snoozeList" class="list"></div>
+      </details>
+    </section>
+
+    <section id="view-issues" class="view" hidden>
       <div class="filters">
         <select id="fSeverity" aria-label="Severity">
           <option value="problems">Errors + checks</option>
@@ -50,11 +101,14 @@
         </select>
         <select id="fTab" aria-label="Tab"><option value="">All tabs</option></select>
       </div>
-      <div id="issueList" class="list"><p class="empty">Press <b>Sync now</b> to compare the plan with Nexl.</p></div>
+      <div id="issueList" class="list"></div>
     </section>
 
     <section id="view-live" class="view" hidden>
-      <input id="liveSearch" type="search" placeholder="Search container, instruction, driver…">
+      <div class="filters">
+        <input id="liveSearch" type="search" placeholder="Search container, instruction, driver…">
+      </div>
+      <label class="check small"><input type="checkbox" id="showDone"> Show completed jobs</label>
       <div id="liveList" class="list"></div>
       <details id="notOnPlan" class="notonplan" hidden>
         <summary>Nexl instructions not on the checked tabs <span id="nopCount"></span></summary>
@@ -63,12 +117,18 @@
     </section>
 
     <section id="view-settings" class="view" hidden>
+      <label class="field">Your name (shown when you snooze an alert)
+        <input type="text" id="sName" maxlength="24" placeholder="e.g. Quintin">
+      </label>
+      <label class="check"><input type="checkbox" id="sAutoOpen"> Open Nexl Check automatically with this workbook</label>
+      <label class="check"><input type="checkbox" id="sSplash"> Show the start-up animation</label>
       <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every <input type="number" id="sMinutes" min="2" max="60" step="1"> min</label>
-      <label class="check"><input type="checkbox" id="sWriteTab"> Keep a <b id="sTabName"></b> tab in the workbook</label>
-      <label class="check"><input type="checkbox" id="sWriteInfo"> Include info items on that tab</label>
+      <label class="check">Snooze alerts for <input type="number" id="sSnoozeMin" min="10" max="480" step="10"> min</label>
       <label class="check"><input type="checkbox" id="sStatusCols"> Show <b>NEXL STEP</b> / <b>NEXL ALERT</b> columns on the plan tabs</label>
       <label class="check"><input type="checkbox" id="sNotes"> Add a note on cells that differ from Nexl</label>
       <p class="muted small" id="notesHint" hidden>Cell notes need a newer Excel version; the status columns still work.</p>
+      <label class="check"><input type="checkbox" id="sWriteTab"> Keep a <b id="sTabName"></b> tab in the workbook</label>
+      <label class="check"><input type="checkbox" id="sWriteInfo"> Include info items on that tab</label>
       <label class="check">Alert "not started" after <input type="number" id="sNotStarted" min="5" max="600" step="5"> min</label>
       <label class="check">Alert "stuck at a stop" after <input type="number" id="sStuck" min="15" max="1440" step="15"> min</label>
       <label class="field">Nexl region
@@ -81,10 +141,19 @@
       </label>
       <h3>Tabs checked</h3>
       <div id="sTabs" class="tablist"></div>
-      <p class="muted small">Matching key: instruction no. + container no. The add-in only reads your plan tabs and never edits them. Column mapping lives in <code>config.js</code>.</p>
+      <p class="muted small">Matching key: instruction no. + container no. The add-in never changes your existing cells; it only writes its own NEXL columns, its own notes and (when you choose) empty cells.</p>
       <p class="muted small" id="versions"></p>
     </section>
   </main>
+
+  <!-- Modal (handover / name prompt) -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><b id="modalTitle"></b><button id="modalClose" class="ghost" type="button" aria-label="Close">✕</button></div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
 
   <script src="config.js"></script>
   <script src="nexl-parsers.js"></script>

@@ -21,7 +21,7 @@
     p.resolve(d);
   });
 
-  function send(type, path, timeoutMs = 45000) {
+  function send(type, path, timeoutMs = 45000, extra = {}) {
     return new Promise((resolve) => {
       const id = "r" + ++seq + "_" + Date.now();
       const timer = setTimeout(() => {
@@ -29,8 +29,13 @@
         resolve({ ok: false, error: type === "ping" ? "NOT_INSTALLED" : "TIMEOUT" });
       }, timeoutMs);
       pending.set(id, { resolve, timer });
-      window.postMessage({ source: "nexl-check-addin", id, type, path }, window.location.origin);
+      window.postMessage(Object.assign({ source: "nexl-check-addin", id, type, path }, extra), window.location.origin);
     });
+  }
+
+  /** Focus Nexl and run its search. Needs bridge 1.1+; older bridges answer UNKNOWN_REQUEST. */
+  function openInNexl(filter, word) {
+    return send("open", "", 30000, { filter, word });
   }
 
   class NexlError extends Error {
@@ -100,5 +105,5 @@
     return out;
   }
 
-  root.NexlClient = { ping, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
+  root.NexlClient = { ping, openInNexl, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
 })(window);

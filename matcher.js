@@ -126,7 +126,7 @@
         const cont = get(r.values, "container");
         const key = compact(cont);
         const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))),
-          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g };
+          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare };
         rowRecs.push(rec);
         if (!key) { g.openSlots++; stats.openSlots++; continue; }
         stats.rowsChecked++;
@@ -255,46 +255,96 @@
       else {
         const g = groups.get(b);
         g.containers.push({ container: "Allocated: " + t.driver.split(" ").slice(0, 2).join(" "), id: t.instruction, sheet: null, nexl: null,
-          tracking: t, issues: [], pending: true, step: legStatus(t, null, now, notStartedMin, stuckMin).step });
+          tracking: t, issues: [], pending: true, leg: legStatus(t, null, now, notStartedMin, stuckMin), step: legStatus(t, null, now, notStartedMin, stuckMin).step });
       }
     }
 
-    const rowStatus = [];
+    const acks = opts.acks || {};
+    const nowMs = now.getTime();
+    const rowStatus = [], fills = [], rows = {};
+    const sheetKeys = new Set(rowRecs.map((r) => r.key).filter(Boolean));
     for (const r of rowRecs) {
       const n = r.entry ? r.entry.nexl : null;
       const ls = legStatus(r.tracking, n, now, notStartedMin, stuckMin);
       const anchor = r.ref("container").col ? r.ref("container") : r.ref("instruction");
+      const progressIssues = [];
       for (const a of ls.alerts) {
-        const iss = { severity: "warn", field: "progress", sheet: "", nexl: ls.step, message: a, instruction: r.id,
+        const iss = { severity: "warn", field: "progress", code: a.code, short: a.short, sheet: "", nexl: ls.step, message: a.text, instruction: r.id,
           container: r.container || (r.tracking ? "(" + r.tracking.driver.split(" ")[0] + ")" : ""), ref: anchor };
         issues.push(iss);
+        progressIssues.push(iss);
         if (r.entry) r.entry.issues.push(iss);
       }
-      if (r.entry) { r.entry.step = ls.step; }
+      if (r.entry) { r.entry.step = ls.step; r.entry.leg = ls; }
       else if (r.tracking) {
         r.group.containers.push({ container: "Slot: " + r.tracking.driver.split(" ").slice(0, 2).join(" "), id: r.id, sheet: anchor, nexl: null,
-          tracking: r.tracking, issues: issues.filter((i) => i.field === "progress" && i.ref === anchor), pending: true, step: ls.step });
+          tracking: r.tracking, issues: progressIssues, pending: true, step: ls.step, leg: ls });
       }
-      const rowIssues = (r.entry ? r.entry.issues : []).filter((i) => i.severity !== "info" && i.field !== "progress");
-      const parts = rowIssues.map(shortIssue).concat(ls.alerts);
+
+      // Blank cells the add-in could fill from Nexl (never overwrites a value).
+      const rowFills = [];
+      const blank = (f) => r.cols[f] !== undefined && clean(r.vals[r.cols[f]]) === "";
+      const addFill = (field, value) => {
+        if (!value || !blank(field)) return;
+        const f = { tab: r.tab, row: r.row, col: colLetter(r.cols[field]), field, value, instruction: r.id, container: r.container };
+        rowFills.push(f); fills.push(f);
+      };
+      if (n) {
+        if (r.compare.includes("seal") && !/^\d{1,2}$/.test(n.seal)) addFill("seal", n.seal);
+        if (r.compare.includes("driver")) addFill("driver", (n.driver || "").split(" ")[0]);
+        if (r.compare.includes("transporter")) addFill("transporter", (n.owner || "").split(" ")[0]);
+      } else if (!r.key && r.tracking) {
+        const tc = compact(r.tracking.container);
+        if (tc && !/^PENDING/.test(tc) && !sheetKeys.has(tc)) addFill("container", r.tracking.container);
+        addFill("driver", r.tracking.driver.split(" ")[0]);
+      }
+
+      const rowIssues = (r.entry ? r.entry.issues : []).filter((i) => i.severity !== "info" && i.field !== "progress").concat(progressIssues);
+      let open = 0;
+      const parts = rowIssues.map((i) => {
+        i.key = issueKey(i);
+        const ak = acks[i.key];
+        if (ak && ak.until > nowMs) { i.ack = ak; return `👀 ${ak.by}: ${i.short || shortIssue(i)}`; }
+        open++;
+        return i.short || shortIssue(i);
+      });
       let level = "";
-      if (rowIssues.some((i) => i.severity === "error")) level = "error";
-      else if (parts.length) level = "warn";
+      if (rowIssues.some((i) => i.severity === "error" && !i.ack)) level = "error";
+      else if (open) level = "warn";
+      else if (parts.length) level = "ack";
       else if (n || r.tracking) level = "ok";
-      rowStatus.push({ tab: r.tab, row: r.row, step: ls.step, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓ OK" : "", level });
+      rowStatus.push({ tab: r.tab, row: r.row, step: ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
+      rows[r.tab + "|" + r.row] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
+        nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor };
     }
+    // Snooze state for issues that aren't tied to a row status (e.g. "In Nexl but not on the sheet").
+    for (const i of issues) if (!i.key) { i.key = issueKey(i); const ak = acks[i.key]; if (ak && ak.until > nowMs) i.ack = ak; }
 
     const notOnPlan = [...instrById.values()].filter((i) => !groups.has(i.base));
     const order = { error: 0, warn: 1, info: 2 };
     issues.sort((a, b) => order[a.severity] - order[b.severity] || String(a.instruction).localeCompare(String(b.instruction)));
     const groupList = [...groups.values()].map((g) => ({ ...g, tabs: [...g.tabs] })).sort((a, b) => b.base.localeCompare(a.base));
-    return { issues, groups: groupList, notOnPlan, stats, rowStatus };
+    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows };
   }
 
   const FIELD_SHORT = { seal: "Seal", booking: "Booking ref", loadRef: "Load ref", vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
   function shortIssue(i) {
-    if (FIELD_SHORT[i.field]) return `${FIELD_SHORT[i.field]} ≠ Nexl (${String(i.nexl).split(" | ")[0]})`;
-    return i.message;
+    const icon = i.severity === "error" ? "⛔" : "⚠";
+    if (FIELD_SHORT[i.field]) return `${icon} ${FIELD_SHORT[i.field]} ≠ ${String(i.nexl).split(" | ")[0]}`;
+    const m = i.message || "";
+    if (/^Possible typo/.test(m)) return `⛔ Typo? Nexl: ${i.nexl}`;
+    if (/anywhere/.test(m)) return "⛔ Not in Nexl";
+    let x;
+    if ((x = /Latest Nexl record: ([\d.]+)/.exec(m))) return `⛔ Not on this instr (Nexl: ${x[1]})`;
+    if ((x = /on instruction ([\d.]+)/.exec(m))) return `⛔ Nexl has it on ${x[1]}`;
+    if (/not found/.test(m)) return "⛔ Not on this instr in Nexl";
+    if (/more than once/.test(m)) return "⚠ Duplicate row";
+    if (/not on the sheet/.test(m)) return "⛔ Missing from sheet";
+    return `${icon} ${m}`;
+  }
+  /** Stable id for an issue, used to snooze/acknowledge it across syncs. */
+  function issueKey(i) {
+    return [i.ref ? i.ref.tab : "", i.ref ? i.ref.row : "", i.field, i.code || "", compact(i.container)].join("|");
   }
 
   /** "202:20:44" -> minutes */
@@ -327,6 +377,10 @@
    * Where is the truck on its instruction?
    * Uses Driver Tracking entry times (pick-up / via / via2 / drop-off) against the route stops.
    */
+  const shortName = (x) => { const v = String(x || "?"); return v.length > 20 ? v.slice(0, 19) + "…" : v; };
+  const dayMon = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ""); return m ? `${m[3]} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m[2] - 1]}` : ""; };
+  const podMark = (p) => (!p ? "" : /verified/i.test(p) ? " · POD ✓" : " · POD ⏳");
+
   function legStatus(t, n, now, notStartedMin = 30, stuckMin = 120) {
     const alerts = [];
     if (t) {
@@ -340,31 +394,37 @@
       }
       let last = -1;
       times.forEach((d, i) => { if (d) last = i; });
+      const stopList = stops.map((s, i) => ({ ...s, time: times[i] ? hhmm(times[i]) : null, done: i <= last && !!times[i] }));
       const legs = Math.max(stops.length - 1, 1);
       const who = t.driver.split(" ").slice(0, 2).join(" ");
+      const first = t.driver.split(" ")[0];
       if (last < 0) {
         const jm = durMin(t.jobDuration);
         const step = `Allocated to ${who}${jm != null ? " " + fmtMin(jm) + " ago" : ""} · not started · first stop: ${stops[0] ? stops[0].name : "?"}`;
-        if (jm != null && jm >= notStartedMin) alerts.push(`Not started: allocated to ${who} ${fmtMin(jm)} ago, no pick-up yet`);
-        return { step, alerts, stage: "allocated" };
+        if (jm != null && jm >= notStartedMin) alerts.push({ code: "notstarted", text: `Not started: allocated to ${who} ${fmtMin(jm)} ago, no pick-up yet`, short: `⏰ Not started ${fmtMin(jm)}` });
+        return { step, short: `⏳ Allocated · ${first}${jm != null ? " · " + fmtMin(jm) : ""}`, alerts, stage: "allocated", stops: stopList, who };
       }
       const at = stops[last], when = times[last];
       if (at.role === "POD" || last === stops.length - 1) {
-        return { step: `Delivered at ${at.name} ${hhmm(when)}${n && n.podStatus && !/verified/i.test(n.podStatus) ? " · POD " + n.podStatus : ""}`, alerts, stage: "delivered" };
+        const pod = n && n.podStatus && !/verified/i.test(n.podStatus) ? " · POD " + n.podStatus : "";
+        return { step: `Delivered at ${at.name} ${hhmm(when)}${pod}`, short: `📍 Delivered ${shortName(at.name)} ${hhmm(when)}${n ? podMark(n.podStatus) : ""}`,
+          alerts, stage: "delivered", stops: stopList, who };
       }
       const next = stops[last + 1];
       const ageMin = (now - when) / 60000;
       const step = `Leg ${last + 1}/${legs}: ${at.name} (${hhmm(when)}) → ${next ? next.name : "?"} · ${who}`;
-      if (ageMin >= stuckMin) alerts.push(`Stuck: at ${at.name} since ${hhmm(when)} (${fmtMin(ageMin)}), not at ${next ? next.name : "next stop"} yet`);
-      return { step, alerts, stage: "moving" };
+      if (ageMin >= stuckMin) alerts.push({ code: "stuck", text: `Stuck: at ${at.name} since ${hhmm(when)} (${fmtMin(ageMin)}), not at ${next ? next.name : "next stop"} yet`,
+        short: `🛑 Stuck at ${shortName(at.name)} ${fmtMin(ageMin)}` });
+      return { step, short: `🚚 ${last + 1}/${legs} → ${shortName(next ? next.name : "?")} · ${first}`, alerts, stage: "moving", stops: stopList, who };
     }
     if (n) {
       if (/complete/i.test(n.moveStatus)) {
-        return { step: `✓ Completed${n.end ? " " + n.end : ""}${n.podStatus && !/verified/i.test(n.podStatus) ? " · POD " + n.podStatus : " · POD verified"}`, alerts, stage: "completed" };
+        return { step: `✓ Completed${n.end ? " " + n.end : ""}${n.podStatus && !/verified/i.test(n.podStatus) ? " · POD " + n.podStatus : " · POD verified"}`,
+          short: `✓ Done${n.end ? " " + dayMon(n.end) : ""}${podMark(n.podStatus || "Verified")}`, alerts, stage: "completed", stops: [] };
       }
-      return { step: `${n.moveStatus || "In Nexl"} (not on driver tracking)`, alerts, stage: "other" };
+      return { step: `${n.moveStatus || "In Nexl"} (not on driver tracking)`, short: `• ${n.moveStatus || "In Nexl"}`, alerts, stage: "other", stops: [] };
     }
-    return { step: "", alerts, stage: "" };
+    return { step: "", short: "", alerts, stage: "", stops: [] };
   }
 
   /** Map config field patterns to column indexes using the header row. */
@@ -384,5 +444,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin };
+  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, shortIssue };
 })(typeof window !== "undefined" ? window : globalThis);

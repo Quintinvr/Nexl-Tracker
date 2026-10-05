@@ -251,5 +251,105 @@
     return { supported: true, added, removed };
   }
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes };
+  // ---------------------------------------------------------------------------
+  // Fill blanks: writes a Nexl value into a cell ONLY if the cell is still empty right now.
+  // ---------------------------------------------------------------------------
+  async function fillBlanks(list) {
+    let filled = 0, skipped = 0;
+    await Excel.run(async (ctx) => {
+      const cells = list.map((f) => { const r = ctx.workbook.worksheets.getItem(f.tab).getRange(f.col + f.row); r.load("values"); return { f, r }; });
+      await ctx.sync();
+      for (const { f, r } of cells) {
+        if (String(r.values[0][0]).trim() !== "") { skipped++; continue; }
+        r.values = [[f.value]];
+        filled++;
+      }
+      await ctx.sync();
+    });
+    return { filled, skipped };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared snoozes ("Seen – I'm on it"): a hidden NEXL_ACK sheet so the whole team sees them.
+  // ---------------------------------------------------------------------------
+  const ACK_SHEET = "NEXL_ACK";
+  async function readAcks() {
+    const out = {};
+    await Excel.run(async (ctx) => {
+      const ws = ctx.workbook.worksheets.getItemOrNullObject(ACK_SHEET);
+      await ctx.sync();
+      if (ws.isNullObject) return;
+      const used = ws.getUsedRangeOrNullObject(true);
+      used.load("values");
+      await ctx.sync();
+      if (used.isNullObject) return;
+      for (const [key, by, until, text] of used.values.slice(1)) {
+        const t = Date.parse(until);
+        if (key && t > Date.now()) out[key] = { by, until: t, text };
+      }
+    });
+    return out;
+  }
+  async function writeAck(key, by, minutes, text) {
+    await Excel.run(async (ctx) => {
+      let ws = ctx.workbook.worksheets.getItemOrNullObject(ACK_SHEET);
+      await ctx.sync();
+      if (ws.isNullObject) {
+        ws = ctx.workbook.worksheets.add(ACK_SHEET);
+        ws.visibility = "Hidden";
+        ws.getRange("A1:D1").values = [["Key", "By", "Until", "What"]];
+      }
+      const used = ws.getUsedRange(true);
+      used.load("values,rowCount");
+      await ctx.sync();
+      const now = Date.now();
+      // Keep live entries only (drop expired ones and any older entry for this key).
+      const keep = used.values.slice(1).filter((r) => r[0] && r[0] !== key && Date.parse(r[2]) > now);
+      if (minutes > 0) keep.push([key, by, new Date(now + minutes * 60000).toISOString(), text || ""]);
+      ws.getRange(`A2:D${Math.max(used.rowCount, 2) + 1}`).clear("Contents");
+      if (keep.length) ws.getRange(`A2:D${keep.length + 1}`).values = keep;
+      await ctx.sync();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selection tracking: tell the panel which plan row the user clicked.
+  // ---------------------------------------------------------------------------
+  const selHandlers = [];
+  async function watchSelection(tabNames, cb) {
+    if (!Office.context.requirements.isSetSupported("ExcelApi", "1.7")) return false;
+    await Excel.run(async (ctx) => {
+      for (const name of tabNames) {
+        const ws = ctx.workbook.worksheets.getItemOrNullObject(name);
+        await ctx.sync();
+        if (ws.isNullObject) continue;
+        selHandlers.push(ws.onSelectionChanged.add(async (ev) => {
+          const m = /(\d+)/.exec(String(ev.address).split(":")[0]);
+          if (m) cb(name, +m[1]);
+        }));
+      }
+      await ctx.sync();
+    });
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auto-open: Office opens the panel whenever this workbook is opened (setting saved in the file).
+  // Needs the manifest's TaskpaneId to be Office.AutoShowTaskpaneWithDocument.
+  // ---------------------------------------------------------------------------
+  function getAutoOpen() {
+    try { return !!Office.context.document.settings.get("Office.AutoShowTaskpaneWithDocument"); } catch (e) { return false; }
+  }
+  function setAutoOpen(on) {
+    return new Promise((resolve) => {
+      try {
+        Office.context.document.settings.set("Office.AutoShowTaskpaneWithDocument", !!on);
+        Office.context.document.settings.saveAsync(() => resolve(true));
+      } catch (e) { resolve(false); }
+    });
+  }
+
+  LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
+
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen };
 })(window);
