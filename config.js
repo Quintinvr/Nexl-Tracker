@@ -22,6 +22,13 @@ window.NEXL_CONFIG = {
   // Raise "stuck" when a truck reached a stop this long ago and hasn't reached the next one.
   stuckMinutes: 120,
 
+  // Safety checks
+  stackDatesTab: "STACK DATES",          // vessel cutoffs (NCT + PECT blocks)
+  transportersTab: "DATA - TRANSPORTER", // GENSET YES/NO per transporter (trailing spaces in the tab name are fine)
+  cutoffWarnHours: 12,                   // amber when a vessel cutoff is this close (red under 3h)
+  pingSilentMinutes: 30,                 // "phone silent" while a truck is between stops
+  whatsAppTab: "PE CITRUS",              // WhatsApp updates are built from every load on this tab
+
   // Header row number on every checked tab.
   headerRow: 1,
 
@@ -39,6 +46,11 @@ window.NEXL_CONFIG = {
     vessel:      [/^VESSEL$/i],
     transporter: [/^TRANSPORTER$/i],
     driver:      [/^DRIVER( NAME)?$/i],
+    genset:      [/^GENSET REQUIRED$/i],
+    equipment:   [/^EQUIPMENT$/i, /^ISO$/i],
+    navis:       [/^NAVIS CHECK$/i],
+    comment:     [/^COMMENT$/i],
+    tare:        [/^TARE$/i],
   },
 
   // Tabs to check. `compare` lists the fields compared against Nexl on that tab.
@@ -46,10 +58,12 @@ window.NEXL_CONFIG = {
   tabs: [
     {
       name: "PE CITRUS",
+      cutoff: "reefer",
       compare: ["seal", "booking", "loadRef", "vessel", "transporter", "driver", "customer"],
     },
     {
       name: "EXPORTS P.E",
+      cutoff: "auto", // reefer cutoff when EQUIPMENT says RH/reefer, otherwise dry
       // The SEAL column on this tab holds stack status / appointment times, so seal is not compared.
       compare: ["booking", "vessel", "driver", "customer"],
     },
@@ -59,6 +73,7 @@ window.NEXL_CONFIG = {
     },
     {
       name: "PLUGGED IN - GROUNDED",
+      cutoff: "reefer",
       compare: ["seal", "booking", "loadRef", "vessel", "driver", "customer"],
     },
   ],

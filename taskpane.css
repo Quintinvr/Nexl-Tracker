@@ -182,3 +182,26 @@ input.full { font-family: inherit; font-size: 13px; }
 .tile span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .detail .vals { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; margin: 6px 0; }
 .detail .vals dt { color: var(--muted); } .detail .vals dd { margin: 0; }
+
+/* ---- v1.3: cutoffs + WhatsApp ---- */
+.cutoffs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.cut { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 6px; padding: 7px 9px; }
+.cut.warn { border-left-color: var(--warn); background: var(--warn-bg); } .cut.err { border-left-color: var(--err); background: var(--err-bg); } .cut.ok { border-left-color: var(--ok); }
+.cutr { display: flex; flex-direction: column; align-items: flex-end; }
+.cutr .big { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.cut.err .big { color: var(--err); } .cut.warn .big { color: var(--warn); }
+.wa { border: 1px solid var(--line); border-left: 4px solid #25d366; border-radius: 6px; padding: 8px 9px; }
+.wa-head { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; margin-bottom: 6px; }
+.wa-msg { font-family: "Segoe UI", system-ui, sans-serif !important; font-size: 12.5px !important; resize: vertical; }
+.wa-copy { background: #1fa855 !important; }
+.wa-copy:disabled { opacity: .5; }
+.wa-opts { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; font-size: 12px; }
+.wa-opts label { display: inline-flex; gap: 4px; align-items: center; }
+.wa-emoji { margin-left: auto; }
+.wa-vessel { font-weight: 600; font-size: 12px; margin: 6px 0 2px; }
+.wa-load { display: grid; grid-template-columns: auto auto 1fr auto; gap: 6px; align-items: center; padding: 3px 0; border-top: 1px dashed var(--line); font-size: 12px; }
+.wa-load .wa-st { color: var(--muted); }
+.wa-load.live .wa-st { color: var(--text); }
+.wa .wa-msg { margin-top: 8px; }
+.detail.off { display: none !important; }
+.tabs button { padding: 8px 7px; white-space: nowrap; }

@@ -4,20 +4,23 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.2.0";
+  const VERSION = "1.3.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false };
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false,
+    cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
+    waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch (e) { /* storage unavailable */ }
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
 
   // ---------- state ----------
-  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set() };
+  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(),
+    extras: {}, waGrid: null, waUnticked: new Set(), waEdits: {} };
   const fmtTime = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const fmtStamp = (d) => d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   const SEV_ORDER = (i) => (i.severity === "error" ? 0 : i.code === "notstarted" ? 1 : i.code === "stuck" ? 2 : 3);
@@ -89,7 +92,8 @@
 
   // ---------- sync ----------
   function matchOpts() {
-    return { now: new Date(), notStartedMinutes: settings.notStarted, stuckMinutes: settings.stuck, acks: state.acks };
+    return { now: new Date(), notStartedMinutes: settings.notStarted, stuckMinutes: settings.stuck, acks: state.acks,
+      extras: state.extras, cutoffWarnHours: settings.cutoffH, pingSilentMinutes: settings.silent };
   }
 
   async function sync() {
@@ -112,8 +116,9 @@
 
       progress(0.22, "Reading plan tabs…");
       const tabsCfg = CFG.tabs.filter((t) => !settings.disabledTabs.includes(t.name));
-      const [sheetTabs, acks] = await Promise.all([ExcelIO.readPlanTabs({ ...CFG, tabs: tabsCfg }, bases), ExcelIO.readAcks().catch(() => ({}))]);
-      state.acks = acks;
+      const [sheetTabs, acks, extras, waGrid] = await Promise.all([ExcelIO.readPlanTabs({ ...CFG, tabs: tabsCfg }, bases), ExcelIO.readAcks().catch(() => ({})),
+        ExcelIO.readExtras(CFG).catch(() => ({})), ExcelIO.readTabValues(CFG.whatsAppTab).catch(() => null)]);
+      state.acks = acks; state.extras = extras; state.waGrid = waGrid;
       const tabWarnings = sheetTabs.filter((t) => t.missing || t.error).map((t) => `${esc(t.name)}: ${t.missing ? "tab not found" : esc(t.error)}`);
       const usable = sheetTabs.filter((t) => !t.missing && !t.error);
 
@@ -233,47 +238,6 @@
     } catch (e) { toast("Couldn't fill: " + e.message); }
   }
 
-  // ---------- handover ----------
-  function buildHandover() {
-    const res = state.result;
-    if (!res) return "Sync first.";
-    const now = new Date();
-    const rows = Object.values(res.rows);
-    const open = res.issues.filter((i) => !i.ack && i.severity !== "info");
-    const errs = open.filter((i) => i.severity === "error");
-    const ns = open.filter((i) => i.code === "notstarted");
-    const stuck = open.filter((i) => i.code === "stuck");
-    const checks = open.filter((i) => i.severity === "warn" && i.field !== "progress");
-    const moving = rows.filter((d) => d.leg.stage === "moving");
-    const delivered = rows.filter((d) => d.leg.stage === "delivered" || (d.leg.stage === "completed" && d.nexl && !/verified/i.test(d.nexl.podStatus || "")));
-    const snoozed = res.issues.filter((i) => i.ack);
-    const where = (i) => (i.ref ? ` (${i.ref.tab} r${i.ref.row})` : "");
-    const L = [];
-    L.push(`NEXL HANDOVER — ${(settings.region || "").toUpperCase()} — ${fmtStamp(now)}${settings.name ? " — " + settings.name : ""}`);
-    L.push(`${moving.length} on the road · ${ns.length} not started · ${stuck.length} stuck · ${errs.length} errors · ${delivered.length} delivered awaiting POD`);
-    const sec = (title, list, fn) => { if (!list.length) return; L.push(""); L.push(`${title} (${list.length})`); list.forEach((x) => L.push("• " + fn(x))); };
-    sec("⛔ ERRORS ON THE PLAN", errs, (i) => `${i.instruction} ${i.container}: ${i.message}${where(i)}`);
-    sec("⏰ ALLOCATED, NOT STARTED", ns, (i) => `${i.instruction} ${i.container}: ${i.message.replace(/^Not started: /, "")}`);
-    sec("🛑 STUCK", stuck, (i) => `${i.instruction} ${i.container}: ${i.message.replace(/^Stuck: /, "")}`);
-    sec("🚚 ON THE ROAD", moving, (d) => `${d.id} ${d.container || ""}: ${d.leg.step}`);
-    sec("📍 DELIVERED — POD OUTSTANDING", delivered, (d) => `${d.id} ${d.container || ""}: ${d.leg.step}`);
-    sec("⚠ CHECK ON THE PLAN", checks, (i) => `${i.instruction} ${i.container}: ${i.message}${i.nexl ? " (Nexl: " + String(i.nexl).split(" | ")[0] + ")" : ""}${where(i)}`);
-    sec("👀 BEING HANDLED", snoozed, (i) => `${i.instruction} ${i.container}: ${i.message} — ${i.ack.by}`);
-    return L.join("\n");
-  }
-  function showHandover() {
-    const text = buildHandover();
-    modal("Shift handover", `<textarea id="hoText" class="full" rows="16" readonly>${esc(text)}</textarea>
-      <div class="row-actions"><button id="hoCopy" class="primary small-btn" type="button">Copy</button>
-      <span class="muted small">Paste into Teams, WhatsApp or email.</span></div>`);
-    $("hoCopy").onclick = async () => {
-      const ta = $("hoText");
-      try { await navigator.clipboard.writeText(ta.value); }
-      catch (e) { ta.select(); document.execCommand("copy"); }
-      toast("Handover copied.");
-    };
-  }
-
   // ---------- rendering ----------
   const FIELD = { container: "Container", instruction: "Instruction", seal: "Seal", booking: "Booking ref", loadRef: "Load ref",
     vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver", progress: "Now" };
@@ -294,6 +258,7 @@
     renderNow();
     renderIssues();
     renderLive();
+    renderWhatsApp();
     if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
   }
 
@@ -342,8 +307,22 @@
     });
   }
 
+  function renderCutoffs() {
+    const box = $("cutoffBox");
+    const list = (state.result.cutoffs || []).filter((c) => c.hoursLeft <= Math.max(settings.cutoffH, 24) && c.hoursLeft > -12);
+    box.hidden = !list.length;
+    box.innerHTML = list.map((c) => {
+      const cls = c.open.length === 0 ? "ok" : c.hoursLeft < 0 ? "err" : c.hoursLeft <= 3 ? "err" : c.hoursLeft <= settings.cutoffH ? "warn" : "";
+      const when = c.at.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+      const left = c.hoursLeft < 0 ? "missed" : NexlMatcher.fmtMin(c.hoursLeft * 60);
+      return `<div class="cut ${cls}"><div><b>⚓ ${esc(c.vessel)}</b> <span class="muted small">${esc(c.terminal)} · ${esc(c.kind)} · ${esc(when)}</span></div>
+        <div class="cutr"><span class="big">${esc(left)}</span><span class="small">${c.total - c.open.length}/${c.total} at port</span></div></div>`;
+    }).join("");
+  }
+
   function renderNow() {
     const res = state.result;
+    renderCutoffs();
     const need = res.issues.filter((i) => !i.ack && (i.severity === "error" || i.severity === "warn")).sort((a, b) => SEV_ORDER(a) - SEV_ORDER(b));
     $("nNeed").textContent = need.length ? `(${need.length})` : "";
     const nl = $("needList");
@@ -441,6 +420,82 @@
     $("nopList").innerHTML = nop.map((i) => `<div><b class="mono">${esc(i.id)}</b> ${esc(i.customer)} · ${esc(i.type)} · ${esc(i.state)}${i.vessel && i.vessel !== "0" ? " · " + esc(i.vessel) : ""}</div>`).join("");
   }
 
+  // ---------- WhatsApp client updates (copy only) ----------
+  async function copyText(text, what) {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {
+      const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); ta.remove();
+    }
+    toast(`${what} copied. Paste it into WhatsApp.`);
+  }
+  function waClients() {
+    const grid = state.waGrid;
+    if (!grid || !grid.length) return [];
+    const cols = NexlMatcher.detectColumns(grid[CFG.headerRow - 1] || [], CFG.fields);
+    const loads = NexlWhatsApp.buildLoads(grid, cols, state.result ? state.result.rows : {}, CFG.whatsAppTab);
+    return NexlWhatsApp.byClient(loads);
+  }
+  const waOpts = () => ({ emoji: settings.waEmoji, fields: settings.waFields });
+
+  function renderWhatsApp() {
+    const el = $("waList");
+    $("waTab").textContent = CFG.whatsAppTab;
+    $("waEmoji").checked = settings.waEmoji;
+    document.querySelectorAll(".wa-opts [data-f]").forEach((cb) => (cb.checked = !!settings.waFields[cb.dataset.f]));
+    const clients = waClients();
+    if (!clients.length) { el.innerHTML = `<p class="empty">No loads found on the ${esc(CFG.whatsAppTab)} tab.</p>`; return; }
+    el.innerHTML = clients.map((c, k) => {
+      const picked = c.loads.filter((l) => !state.waUnticked.has(l.id));
+      const msg = state.waEdits[c.key] != null ? state.waEdits[c.key] : picked.length ? NexlWhatsApp.formatMessage(picked, waOpts()) : "";
+      const vessels = [...new Set(c.loads.map((l) => l.vessel || "VESSEL TBC"))];
+      return `<div class="wa" data-k="${k}">
+        <div class="wa-head"><b>${esc(c.client)}</b><span class="muted small">${picked.length}/${c.loads.length} load(s) selected</span></div>
+        ${vessels.map((v) => `<div class="wa-vessel">${settings.waEmoji ? "🚢 " : ""}${esc(v)}</div>` + c.loads.filter((l) => (l.vessel || "VESSEL TBC") === v).map((l) => `
+          <div class="wa-load${l.live ? " live" : ""}">
+            <input type="checkbox" data-id="${esc(l.id)}" ${state.waUnticked.has(l.id) ? "" : "checked"} aria-label="Include ${esc(l.loadRef)}">
+            <span class="wa-ref mono">${esc(l.loadRef)}</span>
+            <span class="wa-st">${esc(l.status)}</span>
+            <button class="ghost xs wa-one" data-id="${esc(l.id)}" type="button" title="Copy an update for just this load">Copy</button>
+          </div>`).join("")).join("")}
+        <textarea class="full wa-msg" rows="${Math.min(12, msg.split("\n").length + 1)}" placeholder="Tick at least one load">${esc(msg)}</textarea>
+        <div class="row-actions">
+          <button class="wa-copy primary small-btn" type="button" ${picked.length ? "" : "disabled"}>Copy update (${picked.length} load${picked.length === 1 ? "" : "s"})</button>
+          <button class="wa-all ghost xs" type="button">${picked.length === c.loads.length ? "Untick all" : "Tick all"}</button>
+          ${state.waEdits[c.key] != null ? '<button class="wa-reset ghost xs" type="button" title="Discard your edits and rebuild from live status">↺ Rebuild</button>' : ""}
+        </div></div>`;
+    }).join("");
+    el.querySelectorAll(".wa").forEach((box) => {
+      const c = clients[+box.dataset.k];
+      const ta = box.querySelector(".wa-msg");
+      ta.oninput = () => (state.waEdits[c.key] = ta.value);
+      box.querySelectorAll(".wa-load input").forEach((cb) => (cb.onchange = () => {
+        cb.checked ? state.waUnticked.delete(cb.dataset.id) : state.waUnticked.add(cb.dataset.id);
+        delete state.waEdits[c.key];
+        renderWhatsApp();
+      }));
+      box.querySelectorAll(".wa-one").forEach((b) => (b.onclick = () => {
+        const l = c.loads.find((x) => x.id === b.dataset.id);
+        copyText(NexlWhatsApp.formatMessage([l], waOpts()), `Update for ${l.loadRef}`);
+      }));
+      box.querySelector(".wa-copy").onclick = () => copyText(ta.value, `${c.client} update`);
+      box.querySelector(".wa-all").onclick = () => {
+        const all = c.loads.every((l) => !state.waUnticked.has(l.id));
+        c.loads.forEach((l) => (all ? state.waUnticked.add(l.id) : state.waUnticked.delete(l.id)));
+        delete state.waEdits[c.key];
+        renderWhatsApp();
+      };
+      const reset = box.querySelector(".wa-reset");
+      if (reset) reset.onclick = () => { delete state.waEdits[c.key]; renderWhatsApp(); };
+    });
+  }
+  function initWhatsAppOptions() {
+    $("waEmoji").addEventListener("change", () => { settings.waEmoji = $("waEmoji").checked; saveSettings(); state.waEdits = {}; renderWhatsApp(); });
+    document.querySelectorAll(".wa-opts [data-f]").forEach((cb) => cb.addEventListener("change", () => {
+      settings.waFields = { ...settings.waFields, [cb.dataset.f]: cb.checked }; saveSettings(); state.waEdits = {}; renderWhatsApp();
+    }));
+  }
+
   // ---------- selected row details ----------
   function showDetail(tab, row, quiet) {
     const box = $("detail");
@@ -486,7 +541,8 @@
   function showView(v) {
     state.view = v;
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
-    for (const id of ["now", "issues", "live", "settings"]) $("view-" + id).hidden = id !== v;
+    for (const id of ["now", "issues", "live", "wa", "settings"]) $("view-" + id).hidden = id !== v;
+    $("detail").classList.toggle("off", v === "wa" || v === "settings");
   }
 
   function initSettingsUI() {
@@ -506,6 +562,8 @@
     bind("sNotStarted", "notStarted", "value", (v) => Math.max(5, +v || CFG.notStartedMinutes));
     bind("sStuck", "stuck", "value", (v) => Math.max(15, +v || CFG.stuckMinutes));
     bind("sRegion", "region", "value");
+    bind("sCutoffH", "cutoffH", "value", (v) => Math.max(2, Math.min(72, +v || CFG.cutoffWarnHours)));
+    bind("sSilent", "silent", "value", (v) => Math.max(10, Math.min(240, +v || CFG.pingSilentMinutes)));
     $("sTabName").textContent = CFG.checkTabName;
     $("sAutoOpen").checked = ExcelIO.getAutoOpen();
     $("sAutoOpen").addEventListener("change", async () => {
@@ -532,8 +590,8 @@
   Office.onReady(async () => {
     initSplash();
     initSettingsUI();
+    initWhatsAppOptions();
     $("syncBtn").addEventListener("click", sync);
-    $("handoverBtn").addEventListener("click", showHandover);
     $("modalClose").addEventListener("click", closeModal);
     $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
     document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));

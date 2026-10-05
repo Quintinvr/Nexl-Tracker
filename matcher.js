@@ -126,7 +126,7 @@
         const cont = get(r.values, "container");
         const key = compact(cont);
         const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))),
-          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare };
+          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare, cutoffKind: tab.cutoff || null };
         rowRecs.push(rec);
         if (!key) { g.openSlots++; stats.openSlots++; continue; }
         stats.rowsChecked++;
@@ -263,13 +263,15 @@
     const nowMs = now.getTime();
     const rowStatus = [], fills = [], rows = {};
     const sheetKeys = new Set(rowRecs.map((r) => r.key).filter(Boolean));
+    const X = extrasContext(rowRecs, nexl, instrById, nexlByContainer, now, opts);
     for (const r of rowRecs) {
       const n = r.entry ? r.entry.nexl : null;
       const ls = legStatus(r.tracking, n, now, notStartedMin, stuckMin);
+      ls.alerts = ls.alerts.concat(extraAlerts(r, n, ls, X));
       const anchor = r.ref("container").col ? r.ref("container") : r.ref("instruction");
       const progressIssues = [];
       for (const a of ls.alerts) {
-        const iss = { severity: "warn", field: "progress", code: a.code, short: a.short, sheet: "", nexl: ls.step, message: a.text, instruction: r.id,
+        const iss = { severity: a.severity || "warn", field: "progress", code: a.code, short: a.short, sheet: "", nexl: ls.step, message: a.text, instruction: r.id,
           container: r.container || (r.tracking ? "(" + r.tracking.driver.split(" ")[0] + ")" : ""), ref: anchor };
         issues.push(iss);
         progressIssues.push(iss);
@@ -324,7 +326,7 @@
     const order = { error: 0, warn: 1, info: 2 };
     issues.sort((a, b) => order[a.severity] - order[b.severity] || String(a.instruction).localeCompare(String(b.instruction)));
     const groupList = [...groups.values()].map((g) => ({ ...g, tabs: [...g.tabs] })).sort((a, b) => b.base.localeCompare(a.base));
-    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows };
+    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows, cutoffs: cutoffSummary(rowRecs, X, rows) };
   }
 
   const FIELD_SHORT = { seal: "Seal", booking: "Booking ref", loadRef: "Load ref", vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
@@ -354,8 +356,9 @@
   }
   function fmtMin(min) {
     if (min == null) return "";
-    if (min < 60) return Math.round(min) + "m";
-    const h = Math.floor(min / 60), m = Math.round(min % 60);
+    min = Math.round(min);
+    if (min < 60) return min + "m";
+    const h = Math.floor(min / 60), m = min % 60;
     return h >= 48 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h${String(m).padStart(2, "0")}`;
   }
   /** "2026-10-05 07:52" (local time) -> Date */
@@ -427,6 +430,161 @@
     return { step: "", short: "", alerts, stage: "", stops: [] };
   }
 
+  // =====================================================================
+  // Safety checks: vessel cutoffs, genset, silent phone, double allocation
+  // =====================================================================
+  const MON = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, SEPT: 8, OCT: 9, NOV: 10, DEC: 11 };
+  /** Excel serial (46302.29) or "26-OCT-03 1800" -> local Date */
+  function cellDate(v) {
+    if (typeof v === "number" && v > 30000) {
+      const ms = Math.round((v - 25569) * 86400000), d = new Date(ms);
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes());
+    }
+    const m = /^(\d{2})-([A-Z]{3,4})-(\d{2})\s+(\d{2}):?(\d{2})$/i.exec(String(v || "").trim());
+    if (m && MON[m[2].toUpperCase()] !== undefined) return new Date(2000 + +m[1], MON[m[2].toUpperCase()], +m[3], +m[4], +m[5]);
+    return null;
+  }
+  /** STACK DATES tab (any number of terminal blocks, each with its own header row). */
+  function parseStackDates(grid) {
+    const out = [];
+    let H = null, terminal = "";
+    for (const row of grid || []) {
+      const cells = (row || []).map((c) => clean(c).toUpperCase());
+      const vi = cells.indexOf("VESSEL NAME");
+      if (vi >= 0) {
+        H = { vessel: vi, dry: cells.findIndex((c) => /^(DRY CUTOFF|STACKS CLOSED)$/.test(c)), reefer: cells.findIndex((c) => /^(REEFER CUTOFF|REEFERS CLOSED)$/.test(c)), visit: cells.indexOf("VISIT") };
+        continue;
+      }
+      if (!H) continue;
+      const vessel = clean(row[H.vessel]);
+      if (!vessel || /STACK DATES/i.test(vessel)) continue;
+      const visit = H.visit >= 0 ? clean(row[H.visit]) : "";
+      terminal = /^PLZ/i.test(visit) ? "PECT" : /^NCT/i.test(visit) ? "NCT" : terminal;
+      out.push({ vessel, key: compact(vessel), terminal, dry: H.dry >= 0 ? cellDate(row[H.dry]) : null, reefer: H.reefer >= 0 ? cellDate(row[H.reefer]) : null });
+    }
+    return out;
+  }
+  /** DATA - TRANSPORTER tab -> { KEY: {name, genset:"YES"|"NO"|"", drivers:Set} } */
+  function parseTransporters(grid) {
+    const out = {};
+    if (!grid || !grid.length) return out;
+    const head = grid[0].map((c) => clean(c).toUpperCase());
+    const gi = head.indexOf("GENSET");
+    for (const row of grid.slice(1)) {
+      const name = clean(row && row[0]);
+      if (!name) continue;
+      const k = compact(name);
+      const drivers = new Set(row.slice(1, gi >= 0 ? gi : row.length).flatMap((d) => tokens(d, 3)));
+      const prev = out[k];
+      out[k] = { name, genset: gi >= 0 ? clean(row[gi]).toUpperCase() : (prev ? prev.genset : ""), drivers: prev ? new Set([...prev.drivers, ...drivers]) : drivers };
+    }
+    return out;
+  }
+  function findTransporter(map, ...names) {
+    const keys = Object.keys(map);
+    for (const nm of names) {
+      const k = compact(nm);
+      if (!k) continue;
+      const hit = keys.find((x) => x === k) || keys.find((x) => x.length >= 3 && (k.startsWith(x) || x.startsWith(k)));
+      if (hit) return map[hit];
+      const tk = tokens(nm, 3)[0];
+      if (tk) { const h2 = keys.find((x) => x.startsWith(compact(tk))); if (h2) return map[h2]; }
+    }
+    return null;
+  }
+  function vesselStack(stack, vessel, now) {
+    const k = compact(vessel);
+    if (!k || k.length < 4) return null;
+    const cands = stack.filter((s) => s.key === k || s.key.startsWith(k) || k.startsWith(s.key));
+    const ref = now.getTime() - 24 * 3600e3;
+    return cands.filter((s) => (s.reefer || s.dry) && (s.reefer || s.dry).getTime() > ref)
+      .sort((a, b) => (a.reefer || a.dry) - (b.reefer || b.dry))[0] || null;
+  }
+  const dayHm = (d) => `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${hhmm(d)}`;
+
+  function extrasContext(rowRecs, nexl, instrById, nexlByContainer, now, opts) {
+    const x = opts.extras || {};
+    const ctx = {
+      now, stack: x.stack ? parseStackDates(x.stack) : [], transporters: x.transporters ? parseTransporters(x.transporters) : {},
+      cutoffWarnH: opts.cutoffWarnHours ?? 12, cutoffRedH: 3, silentMin: opts.pingSilentMinutes ?? 30,
+      activeByDriver: new Map(), planByContainer: new Map(), nexlByContainer, instrById,
+    };
+    for (const t of nexl.tracking || []) {
+      const st = legStatus(t, null, now, 1e9, 1e9).stage;
+      if (st !== "allocated" && st !== "moving") continue;
+      const k = compact(t.driver);
+      if (!k) continue;
+      if (!ctx.activeByDriver.has(k)) ctx.activeByDriver.set(k, []);
+      ctx.activeByDriver.get(k).push(t);
+    }
+    for (const r of rowRecs) if (r.key) { if (!ctx.planByContainer.has(r.key)) ctx.planByContainer.set(r.key, []); ctx.planByContainer.get(r.key).push(r); }
+    return ctx;
+  }
+  const rowVal = (r, f) => (r.cols[f] === undefined ? "" : clean(r.vals[r.cols[f]]));
+  const isReeferRow = (r) => r.cutoffKind === "reefer" || (r.cutoffKind === "auto" && /R[HFE]?\b|REEF/i.test(rowVal(r, "equipment")));
+
+  function extraAlerts(r, n, ls, X) {
+    const out = [];
+    const finished = ls.stage === "delivered" || ls.stage === "completed";
+    // 1. Vessel cutoff countdown (exports only)
+    if (r.cutoffKind && X.stack.length) {
+      const v = vesselStack(X.stack, rowVal(r, "vessel") || (r.group.nexl[0] || {}).vessel, X.now);
+      const reefer = isReeferRow(r);
+      const cut = v && (reefer ? v.reefer || v.dry : v.dry || v.reefer);
+      if (cut) {
+        const h = (cut - X.now) / 3600e3, kind = reefer ? "reefer" : "dry";
+        r.cutoff = { vessel: v.vessel, terminal: v.terminal, kind, at: cut, hoursLeft: h };
+        if (finished) { /* already delivered: counted in the summary, no alert */ }
+        else if (h < 0 && h > -24) out.push({ code: "cutoff", severity: "error", text: `Missed ${kind} cutoff for ${v.vessel} (${v.terminal} ${dayHm(cut)}) and not delivered`, short: `⚓ Cutoff missed ${dayHm(cut)}` });
+        else if (h >= 0 && h <= X.cutoffWarnH) out.push({ code: "cutoff", severity: h <= X.cutoffRedH ? "error" : "warn",
+          text: `${v.vessel} ${kind} cutoff in ${fmtMin(h * 60)} (${v.terminal} ${dayHm(cut)}), container not at port yet`, short: `⚓ Cutoff in ${fmtMin(h * 60)}` });
+      }
+    }
+    // 2. Genset mismatch
+    if (!finished && r.cols.genset !== undefined && /^Y/i.test(rowVal(r, "genset"))) {
+      const tr = findTransporter(X.transporters, rowVal(r, "transporter"), n && n.owner, r.tracking && r.tracking.owner);
+      if (tr && tr.genset === "NO") out.push({ code: "genset", severity: "error", text: `Genset required but ${tr.name} has no genset (DATA - TRANSPORTER)`, short: `🔌 Needs genset, ${tr.name} has none` });
+    }
+    // 3. Phone gone silent while the truck is between stops
+    if (r.tracking && ls.stage === "moving") {
+      const pm = durMin(r.tracking.lastPing);
+      if (pm != null && pm >= X.silentMin) out.push({ code: "silent", severity: pm >= 90 ? "error" : "warn",
+        text: `No signal from ${ls.who || r.tracking.driver}'s phone for ${fmtMin(pm)} while on the road`, short: `📵 No signal ${fmtMin(pm)}` });
+    }
+    // 4. Driver on two active jobs at once
+    if (r.tracking && (ls.stage === "allocated" || ls.stage === "moving")) {
+      const others = (X.activeByDriver.get(compact(r.tracking.driver)) || []).filter((t) => t !== r.tracking);
+      if (others.length) {
+        const list = [...new Set(others.map((t) => t.instruction))].join(", ");
+        out.push({ code: "dbldriver", severity: "warn", text: `${ls.who || r.tracking.driver} is also allocated to ${list}, so one load will wait`, short: `👥 Driver also on ${list}` });
+      }
+    }
+    // 5. Container on two live jobs
+    if (r.key && !finished) {
+      const planDup = (X.planByContainer.get(r.key) || []).filter((o) => o !== r && o.base !== r.base);
+      const nexlDup = (X.nexlByContainer.get(r.key) || []).filter((c) => baseInstr(c.instruction) !== r.base && !/complete/i.test(c.moveStatus || "")
+        && (X.instrById.get(c.instruction) || {}).state !== "Completed");
+      const list = [...new Set([...planDup.map((o) => o.id), ...nexlDup.map((c) => c.instruction)])];
+      if (list.length) out.push({ code: "dblcontainer", severity: "warn", text: `Container ${r.container} is also on live instruction ${list.join(", ")}`, short: `🔁 Also on ${list.join(", ")}` });
+    }
+    return out;
+  }
+
+  function cutoffSummary(rowRecs, X, rows) {
+    const by = new Map();
+    for (const r of rowRecs) {
+      if (!r.cutoff) continue;
+      const d = rows[r.tab + "|" + r.row];
+      const done = d && (d.leg.stage === "delivered" || d.leg.stage === "completed");
+      const k = r.cutoff.vessel + "|" + r.cutoff.kind;
+      if (!by.has(k)) by.set(k, { ...r.cutoff, total: 0, done: 0, open: [] });
+      const g = by.get(k);
+      g.total++;
+      if (done) g.done++; else g.open.push({ tab: r.tab, row: r.row, id: r.id, container: r.container });
+    }
+    return [...by.values()].filter((g) => g.hoursLeft > -24).sort((a, b) => a.at - b.at);
+  }
+
   /** Map config field patterns to column indexes using the header row. */
   function detectColumns(headerValues, fieldPatterns, overrides) {
     const cols = {};
@@ -444,5 +602,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, shortIssue };
+  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);

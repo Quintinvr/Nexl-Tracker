@@ -37,7 +37,6 @@
       <span class="mini-logo">Ne<b>X</b>L</span><span>Check</span>
     </div>
     <div class="top-actions">
-      <button id="handoverBtn" class="ghost" type="button" title="Build a shift handover summary">📋 Handover</button>
       <button id="syncBtn" class="primary" type="button">Sync now</button>
     </div>
   </header>
@@ -60,8 +59,9 @@
 
   <nav class="tabs" role="tablist">
     <button role="tab" data-view="now" class="active">Now</button>
-    <button role="tab" data-view="issues">All issues</button>
+    <button role="tab" data-view="issues">Issues</button>
     <button role="tab" data-view="live">Jobs</button>
+    <button role="tab" data-view="wa">WhatsApp</button>
     <button role="tab" data-view="settings">Settings</button>
   </nav>
 
@@ -70,6 +70,7 @@
     <section id="detail" class="detail" hidden></section>
 
     <section id="view-now" class="view">
+      <div id="cutoffBox" class="cutoffs" hidden></div>
       <h3 class="sec">Needs attention <span id="nNeed" class="count"></span></h3>
       <div id="needList" class="list"><p class="empty">Press <b>Sync now</b> to compare the plan with Nexl.</p></div>
 
@@ -116,6 +117,19 @@
       </details>
     </section>
 
+    <section id="view-wa" class="view" hidden>
+      <div class="wa-opts">
+        <span class="muted small">Add to each load:</span>
+        <label><input type="checkbox" data-f="container"> Container</label>
+        <label><input type="checkbox" data-f="seal"> Seal</label>
+        <label><input type="checkbox" data-f="tare"> Tare</label>
+        <label><input type="checkbox" data-f="booking"> Booking ref</label>
+        <label class="wa-emoji"><input type="checkbox" id="waEmoji"> Emojis 😀</label>
+      </div>
+      <p class="muted small">All loads on <b id="waTab">PE CITRUS</b>, one message per client, split per vessel. Tick the loads to include (bulk), or use <b>Copy</b> on a single load. Live Nexl status is used while a truck is on the load; otherwise the sheet's COMMENT.</p>
+      <div id="waList" class="list"></div>
+    </section>
+
     <section id="view-settings" class="view" hidden>
       <label class="field">Your name (shown when you snooze an alert)
         <input type="text" id="sName" maxlength="24" placeholder="e.g. Quintin">
@@ -131,6 +145,8 @@
       <label class="check"><input type="checkbox" id="sWriteInfo"> Include info items on that tab</label>
       <label class="check">Alert "not started" after <input type="number" id="sNotStarted" min="5" max="600" step="5"> min</label>
       <label class="check">Alert "stuck at a stop" after <input type="number" id="sStuck" min="15" max="1440" step="15"> min</label>
+      <label class="check">Warn before vessel cutoff <input type="number" id="sCutoffH" min="2" max="72" step="1"> h</label>
+      <label class="check">Alert "phone silent" after <input type="number" id="sSilent" min="10" max="240" step="5"> min</label>
       <label class="field">Nexl region
         <select id="sRegion">
           <option value="pe">Port Elizabeth</option>
@@ -146,7 +162,7 @@
     </section>
   </main>
 
-  <!-- Modal (handover / name prompt) -->
+  <!-- Modal (name prompt) -->
   <div id="modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><b id="modalTitle"></b><button id="modalClose" class="ghost" type="button" aria-label="Close">✕</button></div>
@@ -159,6 +175,7 @@
   <script src="nexl-parsers.js"></script>
   <script src="matcher.js"></script>
   <script src="nexl-client.js"></script>
+  <script src="wa.js"></script>
   <script src="excel-io.js"></script>
   <script src="taskpane.js"></script>
 </body>

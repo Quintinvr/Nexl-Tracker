@@ -57,7 +57,7 @@
         if (loaded.length) await ctx.sync();
         const rows = [];
         for (const { b, rng } of loaded) rng.values.forEach((vals, i) => rows.push({ row: b.start + i + 1, values: vals }));
-        out.push({ name: tab.name, compare: tab.compare, cols, rows });
+        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, cols, rows });
       }
       return out;
     });
@@ -349,7 +349,41 @@
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Extra reference tabs: STACK DATES (cutoffs) and DATA - TRANSPORTER (gensets)
+  // ---------------------------------------------------------------------------
+  async function readTabByName(ctx, wanted) {
+    const sheets = ctx.workbook.worksheets;
+    sheets.load("items/name");
+    await ctx.sync();
+    const ws = sheets.items.find((w) => w.name.trim().toUpperCase() === wanted.trim().toUpperCase());
+    if (!ws) return null;
+    const used = ws.getUsedRangeOrNullObject(true);
+    used.load("values,rowIndex,columnIndex");
+    await ctx.sync();
+    if (used.isNullObject) return [];
+    // Re-base to A1 so row/column positions match the sheet.
+    const grid = [];
+    used.values.forEach((r, i) => { grid[used.rowIndex + i] = Array(used.columnIndex).fill("").concat(r); });
+    return Array.from({ length: grid.length }, (_, i) => grid[i] || []);
+  }
+  async function readExtras(cfg) {
+    const out = {};
+    await Excel.run(async (ctx) => {
+      out.stack = await readTabByName(ctx, cfg.stackDatesTab);
+      out.transporters = await readTabByName(ctx, cfg.transportersTab);
+    });
+    return out;
+  }
+
+  /** All values of one tab (used range re-based to A1), or null if the tab doesn't exist. */
+  async function readTabValues(name) {
+    let out = null;
+    await Excel.run(async (ctx) => { out = await readTabByName(ctx, name); });
+    return out;
+  }
+
   LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen };
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
 })(window);
