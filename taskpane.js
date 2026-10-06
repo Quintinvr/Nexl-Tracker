@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.4.0";
+  const VERSION = "1.4.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -201,7 +201,7 @@
         <div class="row-actions"><button id="nameOk" class="primary small-btn" type="button">Save</button></div>`);
       const go = () => { const v = $("nameIn").value.trim(); if (!v) return; settings.name = v; $("sName").value = v; saveSettings(); closeModal(); resolve(v); };
       $("nameOk").onclick = go;
-      $("nameIn").onkeydown = (e) => e.key === "Enter" && go();
+      $("nameIn").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
       $("nameIn").focus();
     });
   }
