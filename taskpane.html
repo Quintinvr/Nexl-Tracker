@@ -120,6 +120,10 @@
     </section>
 
     <section id="view-wa" class="view" hidden>
+      <div class="wa-pick">
+        <label class="wa-date">📅 Load date <select id="waDate"></select></label>
+        <label class="wa-date">👤 Client <select id="waClient"></select></label>
+      </div>
       <div class="wa-opts">
         <span class="muted small">Add to each load:</span>
         <label><input type="checkbox" data-f="container"> Container</label>
@@ -128,7 +132,7 @@
         <label><input type="checkbox" data-f="booking"> Booking ref</label>
         <label class="wa-emoji"><input type="checkbox" id="waEmoji"> Emojis 😀</label>
       </div>
-      <p class="muted small">All loads on <b id="waTab">PE CITRUS</b>, one message per client, split per vessel. Tick the loads to include (bulk), or use <b>Copy</b> on a single load. Live Nexl status is used while a truck is on the load; otherwise the sheet's COMMENT.</p>
+      <p class="muted small">Loads on <b id="waTab">PE CITRUS</b> for the chosen load date and client, split per vessel. Tick the loads to include, or use <b>Copy</b> on a single load. Live Nexl status while a truck is on the load; otherwise the sheet's COMMENT.</p>
       <div id="waList" class="list"></div>
     </section>
 

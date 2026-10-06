@@ -51,6 +51,7 @@ window.NEXL_CONFIG = {
     navis:       [/^NAVIS CHECK$/i],
     comment:     [/^COMMENT$/i],
     tare:        [/^TARE$/i],
+    loadDate:    [/LOAD DATE$/i, /^LOADING DATE$/i, /^DATE$/i],
   },
 
   // Tabs to check. `compare` lists the fields compared against Nexl on that tab.

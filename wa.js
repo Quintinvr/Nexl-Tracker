@@ -30,6 +30,27 @@
    * @param cols   column map from NexlMatcher.detectColumns
    * @param rows   result.rows from the matcher (keyed "PE CITRUS|<row>") for live status
    */
+  const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, SEPT: 8, OCT: 9, NOV: 10, DEC: 11 };
+  /** Load date cell -> "YYYY-MM-DD" (Excel serial, 05/10/2026, 2026-10-05, 05-Oct-2026, 5 Oct). "" if none. */
+  function dateKey(v, year = new Date().getFullYear()) {
+    const pad = (n) => String(n).padStart(2, "0");
+    const k = (y, m, d) => (y > 1999 && m >= 0 && m < 12 && d >= 1 && d <= 31 ? `${y}-${pad(m + 1)}-${pad(d)}` : "");
+    if (typeof v === "number" && v > 30000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 86400000)); return k(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
+    const s = String(v == null ? "" : v).trim().toUpperCase();
+    let m;
+    if ((m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(s))) return k(+m[1], +m[2] - 1, +m[3]);
+    if ((m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(s))) return k(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2] - 1, +m[1]); // SA: day/month/year
+    if ((m = /^(\d{1,2})[-\s]?([A-Z]{3,4})[A-Z]*[-\s,]*(\d{2,4})?$/.exec(s)) && MONTHS[m[2]] !== undefined) return k(m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : year, MONTHS[m[2]], +m[1]);
+    return "";
+  }
+  /** "2026-10-05" -> "Mon 05 Oct" */
+  function dateLabel(key) {
+    if (!key) return "No date";
+    const [y, m, d] = key.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dt.getDay()]} ${String(d).padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]}`;
+  }
+
   function buildLoads(grid, cols, rows, tabName) {
     const get = (r, f) => (cols[f] === undefined ? "" : clean(r[cols[f]]));
     const loads = [];
@@ -52,6 +73,7 @@
         id: `${tabName}|${i + 1}`, row: i + 1, client, clientKey: compact(client),
         vessel: get(r, "vessel"), loadRef: loadRef || container, container, seal: get(r, "seal"),
         tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed),
+        date: cols.loadDate === undefined ? "" : dateKey(r[cols.loadDate]),
       });
     });
     return loads;
@@ -109,5 +131,5 @@
     return out.join("\n");
   }
 
-  root.NexlWhatsApp = { buildLoads, byClient, formatMessage, liveStatus };
+  root.NexlWhatsApp = { dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
 })(typeof window !== "undefined" ? window : globalThis);

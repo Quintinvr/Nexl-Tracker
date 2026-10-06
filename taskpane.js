@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.8.4";
+  const VERSION = "1.8.5";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -20,7 +20,7 @@
 
   // ---------- state ----------
   const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(), slips: {}, sealOk: new Set(),
-    extras: {}, waGrid: null, waUnticked: new Set(), waEdits: {} };
+    extras: {}, waGrid: null, waUnticked: new Set(), waEdits: {}, waClient: null };
   const fmtTime = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const fmtStamp = (d) => d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   const SEV_ORDER = (i) => (i.severity === "error" ? 0 : i.code === "notstarted" ? 1 : i.code === "stuck" ? 2 : 3);
@@ -738,7 +738,29 @@
     if (!grid || !grid.length) return [];
     const cols = NexlMatcher.detectColumns(grid[CFG.headerRow - 1] || [], CFG.fields);
     const loads = NexlWhatsApp.buildLoads(grid, cols, state.result ? state.result.rows : {}, CFG.whatsAppTab);
-    return NexlWhatsApp.byClient(loads);
+    state.waAll = loads;
+    const pick = waDatePick(loads);
+    return NexlWhatsApp.byClient(pick === "*" ? loads : loads.filter((l) => l.date === pick));
+  }
+  const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  // Which load date to build the update for: the user's pick, else today, else every date.
+  function waDatePick(loads) {
+    const today = localToday();
+    const dates = new Set(loads.map((l) => l.date));
+    if (state.waDate != null && (state.waDate === "*" || dates.has(state.waDate))) return state.waDate;
+    return dates.has(today) ? today : "*";
+  }
+  function renderWaDates() {
+    const loads = state.waAll || [], sel = $("waDate");
+    const count = new Map();
+    for (const l of loads) count.set(l.date, (count.get(l.date) || 0) + 1);
+    const today = localToday();
+    const keys = [...count.keys()].sort((a, b) => (!a ? 1 : !b ? -1 : a.localeCompare(b)));
+    const pick = waDatePick(loads);
+    sel.innerHTML = `<option value="*">All dates (${loads.length})</option>` + keys.map((k) =>
+      `<option value="${esc(k)}" ${k === pick ? "selected" : ""}>${esc(NexlWhatsApp.dateLabel(k))}${k === today ? " · today" : ""} (${count.get(k)})</option>`).join("");
+    if (pick === "*") sel.value = "*";
+    sel.parentElement.hidden = !loads.length;
   }
   const waOpts = () => ({ emoji: settings.waEmoji, fields: settings.waFields });
 
@@ -747,8 +769,17 @@
     $("waTab").textContent = CFG.whatsAppTab;
     $("waEmoji").checked = settings.waEmoji;
     document.querySelectorAll(".wa-opts [data-f]").forEach((cb) => (cb.checked = !!settings.waFields[cb.dataset.f]));
-    const clients = waClients();
-    if (!clients.length) { el.innerHTML = `<p class="empty">No loads found on the ${esc(CFG.whatsAppTab)} tab.</p>`; return; }
+    const allClients = waClients();
+    renderWaDates();
+    // Client drop-down: one client at a time keeps it clean (or "All clients").
+    if (state.waClient !== "*" && !allClients.some((c) => c.key === state.waClient)) state.waClient = allClients[0] ? allClients[0].key : "*";
+    const cs = $("waClient");
+    cs.innerHTML = `<option value="*">All clients (${allClients.length})</option>` + allClients.map((c) =>
+      `<option value="${esc(c.key)}">${esc(c.client)} — ${c.loads.length} load${c.loads.length === 1 ? "" : "s"}</option>`).join("");
+    cs.value = state.waClient;
+    cs.parentElement.hidden = !allClients.length;
+    const clients = state.waClient === "*" ? allClients : allClients.filter((c) => c.key === state.waClient);
+    if (!clients.length) { el.innerHTML = `<p class="empty">No loads found on the ${esc(CFG.whatsAppTab)} tab${state.waAll && state.waAll.length ? " for this date" : ""}.</p>`; return; }
     el.innerHTML = clients.map((c, k) => {
       const picked = c.loads.filter((l) => !state.waUnticked.has(l.id));
       const msg = state.waEdits[c.key] != null ? state.waEdits[c.key] : picked.length ? NexlWhatsApp.formatMessage(picked, waOpts()) : "";
@@ -924,6 +955,8 @@
     $("fillAll").addEventListener("click", () => { (state.result ? state.result.fills : []).forEach((f, k) => fillAllowed(f) && state.fillSel.add(k)); renderFills(); });
     $("fillSel").addEventListener("click", () => doFill([...state.fillSel].map((k) => state.result.fills[k]).filter(Boolean)));
     $("hideBtn").addEventListener("click", hidePanel);
+    $("waDate").addEventListener("change", () => { state.waDate = $("waDate").value; state.waEdits = {}; renderWhatsApp(); });
+    $("waClient").addEventListener("change", () => { state.waClient = $("waClient").value; renderWhatsApp(); });
     if (canHide() && Office.addin.onVisibilityModeChanged) {
       Office.addin.onVisibilityModeChanged((a) => {
         state.hidden = a.visibilityMode !== "Taskpane";
