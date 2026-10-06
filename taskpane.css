@@ -216,3 +216,8 @@ button.link { background: none; border: 0; color: #2f6fd6; text-decoration: unde
 .dphoto { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; margin: 6px 0; }
 .dphoto .thumb { width: 84px; height: 64px; object-fit: cover; border-radius: 6px; cursor: zoom-in; border: 1px solid #ccc; }
 .cphoto { width: 100%; max-height: 55vh; object-fit: contain; border-radius: 6px; background: #111; }
+
+/* bypass */
+.reasons { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 8px; }
+.reasons label { display: flex; gap: 6px; align-items: center; }
+.bypass-why { color: #1e6b34; margin-top: 2px; }

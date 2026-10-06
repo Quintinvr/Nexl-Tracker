@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.4.1";
+  const VERSION = "1.5.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -151,7 +151,7 @@
 
       if (settings.writeTab) {
         progress(0.96, `Updating ${CFG.checkTabName} tab…`);
-        const list = res.issues.filter((i) => settings.writeInfo || i.severity !== "info");
+        const list = res.issues.filter((i) => !i.bypass && (settings.writeInfo || i.severity !== "info"));
         try {
           await ExcelIO.writeCheckTab(CFG, list, (i) => { const d = state.firstSeen.get(i.key); return d ? fmtStamp(d) : ""; }, fmtStamp(now));
         } catch (e) { tabWarnings.push(`Couldn't update the ${esc(CFG.checkTabName)} tab (${esc(e.message)}). The panel is still up to date.`); }
@@ -160,7 +160,7 @@
       if (settings.notes) {
         progress(0.98, "Updating cell notes…");
         try {
-          const n = await ExcelIO.syncNotes(CFG, res.issues, fmtTime(now));
+          const n = await ExcelIO.syncNotes(CFG, res.issues.filter((i) => !i.bypass), fmtTime(now));
           if (!n.supported) $("notesHint").hidden = false;
         } catch (e) { tabWarnings.push(`Couldn't update cell notes (${esc(e.message)}).`); }
       }
@@ -212,9 +212,44 @@
     try {
       await ExcelIO.writeAck(issue.key, by, m, issue.message);
       state.acks = await ExcelIO.readAcks();
-      toast(m ? `Snoozed for ${m} min — the team sees "👀 ${by}"` : "Snooze removed");
+      toast(m ? `Snoozed for ${m} min — the team sees "👀 ${by}"` : issue.bypass ? "Bypass undone — the alert is back" : "Snooze removed");
       await recompute();
+      if (!m && issue.bypass && settings.notes) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
     } catch (e) { toast("Couldn't save the snooze: " + e.message); }
+  }
+
+  // Bypass = "this is OK / resolved": the alert is cleared for everyone (status column, notes, NEXL CHECK)
+  // and stays cleared until the sheet or Nexl value changes, then it is flagged again.
+  const BYPASS_REASONS = ["Sheet is correct", "Nexl will be corrected", "Agreed with client / transporter", "Known exception"];
+  async function bypass(list) {
+    list = list.filter((i) => !i.ack || !i.bypass);
+    if (!list.length) return;
+    const by = await ensureName();
+    const what = list.length === 1 ? esc(list[0].message) : `${list.length} alerts on this row`;
+    modal("Bypass alert", `<p class="small"><b>${what}</b></p>
+      <p class="small muted">The alert is cleared for the whole team and comes back only if the sheet or Nexl value changes.</p>
+      <div class="reasons">${BYPASS_REASONS.map((r, k) => `<label class="small"><input type="radio" name="bpWhy" value="${esc(r)}" ${k === 0 ? "checked" : ""}> ${esc(r)}</label>`).join("")}
+      <label class="small"><input type="radio" name="bpWhy" value=""> Other:</label></div>
+      <input id="bpText" type="text" maxlength="80" placeholder="Note (optional)" class="full">
+      <div class="row-actions"><button id="bpOk" class="primary small-btn" type="button">✔ Bypass</button>
+      <button id="bpCancel" class="ghost small-btn" type="button">Cancel</button></div>`);
+    $("bpCancel").onclick = closeModal;
+    $("bpText").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("bpOk").click(); } };
+    $("bpText").oninput = () => { if ($("bpText").value) { const o = document.querySelector('input[name="bpWhy"][value=""]'); if (o && !document.querySelector('input[name="bpWhy"]:checked').value) o.checked = true; } };
+    $("bpOk").onclick = async () => {
+      const pick = (document.querySelector('input[name="bpWhy"]:checked') || {}).value || "";
+      const note = $("bpText").value.trim();
+      const reason = [pick, note].filter(Boolean).join(" — ").replace(/^[=+\-@]/, "'$&");
+      if (!reason) { $("bpText").focus(); toast("Add a short note for 'Other'."); return; }
+      closeModal();
+      try {
+        for (const i of list) await ExcelIO.writeAck(i.key, by, 0, reason, { kind: "bypass", fp: NexlMatcher.issueFp(i) });
+        state.acks = await ExcelIO.readAcks();
+        toast(`✔ Bypassed ${list.length === 1 ? "alert" : list.length + " alerts"} — the team sees "✔ ${by}"`);
+        await recompute();
+        if (settings.notes) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
+      } catch (e) { toast("Couldn't save the bypass: " + e.message); }
+    };
   }
 
   async function openNexl(word, filter) {
@@ -328,6 +363,12 @@
     if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
   }
 
+  const ackTag = (i) => (i.bypass ? "✔ " : "👀 ") + esc(i.ack.by);
+  function ackButtons(i) {
+    if (i.ack) return i.bypass ? `<button class="ghost xs" data-act="unsnooze" title="${esc(i.ack.text || "")}">↩ Undo bypass</button>`
+      : `<button class="ghost xs" data-act="unsnooze">Un-snooze</button>`;
+    return `<button class="ghost xs" data-act="snooze">👀 I'm on it</button><button class="ghost xs" data-act="bypass" title="Mark as resolved / OK as is">✔ Bypass</button>`;
+  }
   function issueCard(i, k, opts = {}) {
     const where = i.ref ? `${esc(i.ref.tab)} · ${esc((i.ref.col || "") + i.ref.row)}` : "";
     const since = state.firstSeen.get(i.key);
@@ -341,14 +382,15 @@
         ${extra ? `<div class="small">${extra}</div>` : ""}
         <div class="card-actions">
           <button class="ghost xs" data-act="go">Go</button>
-          ${i.ack ? `<button class="ghost xs" data-act="unsnooze">Un-snooze</button>` : `<button class="ghost xs" data-act="snooze">👀 I'm on it</button>`}
+          ${ackButtons(i)}
           <button class="ghost xs" data-act="nexl" data-word="${esc(word)}" data-filter="${filter}">Nexl ↗</button>
-          <span class="muted small since">${i.ack ? "👀 " + esc(i.ack.by) : since ? fmtTime(since) : ""}</span>
+          <span class="muted small since">${i.ack ? ackTag(i) : since ? fmtTime(since) : ""}</span>
         </div></div>`;
     }
     return `<div class="card ${i.ack ? "acked" : i.severity}" data-k="${k}">
-      <div class="where"><span>${where}</span><span>${i.ack ? "👀 " + esc(i.ack.by) : since ? "since " + fmtTime(since) : ""}</span></div>
+      <div class="where"><span>${where}</span><span>${i.ack ? ackTag(i) : since ? "since " + fmtTime(since) : ""}</span></div>
       <div class="what">${esc(i.message)}</div>
+      ${i.bypass && i.ack.text ? `<div class="small bypass-why">✔ Bypassed by ${esc(i.ack.by)}: ${esc(i.ack.text)}</div>` : ""}
       <dl class="vals">
         <dt>Instr.</dt><dd class="mono">${esc(i.instruction)}</dd>
         <dt>Container</dt><dd class="mono">${esc(i.container)}</dd>
@@ -356,7 +398,7 @@
       </dl>
       <div class="card-actions">
         <button class="ghost xs" data-act="go">Go to row</button>
-        ${i.ack ? `<button class="ghost xs" data-act="unsnooze">Un-snooze</button>` : opts.noSnooze ? "" : `<button class="ghost xs" data-act="snooze">👀 I'm on it</button>`}
+        ${opts.noSnooze && !i.ack ? "" : ackButtons(i)}
         <button class="ghost xs" data-act="nexl" data-word="${esc(word)}" data-filter="${filter}">Nexl ↗</button>
       </div></div>`;
   }
@@ -366,6 +408,7 @@
       c.addEventListener("click", (e) => {
         const act = e.target.dataset && e.target.dataset.act;
         if (act === "snooze") { e.stopPropagation(); snooze(i); return; }
+        if (act === "bypass") { e.stopPropagation(); bypass([i]); return; }
         if (act === "unsnooze") { e.stopPropagation(); snooze(i, 0); return; }
         if (act === "nexl") { e.stopPropagation(); openNexl(e.target.dataset.word, e.target.dataset.filter); return; }
         if (i.ref) { ExcelIO.goTo(i.ref).catch(() => {}); showDetail(i.ref.tab, i.ref.row); }
@@ -583,7 +626,7 @@
         ${n.podStatus ? `<dt>POD</dt><dd>${podBadge(n.podStatus)}</dd>` : ""}
         ${t && t.lastPing ? `<dt>Last ping</dt><dd>${esc(t.lastPing)} ago</dd>` : ""}
       </dl>
-      ${issues.length ? `<div class="dissues">${issues.map((i) => `<div class="di ${i.ack ? "acked" : i.severity}">${esc(i.ack ? "👀 " + i.ack.by + ": " : "")}${esc(i.message)}</div>`).join("")}</div>` : ""}
+      ${issues.length ? `<div class="dissues">${issues.map((i) => `<div class="di ${i.ack ? "acked" : i.severity}">${i.ack ? ackTag(i) + ": " : ""}${esc(i.message)}${i.bypass && i.ack.text ? ` <span class="muted">(${esc(i.ack.text)})</span>` : ""}</div>`).join("")}</div>` : ""}
       ${d.fills.length ? `<div class="dfills">${d.fills.map((f, k) => f.needsPhoto
         ? `<div class="dphoto">${photoOf(f).photo ? `<img class="thumb" data-ph="${k}" src="${esc(photoOf(f).photo)}" alt="Container photo" title="Click to enlarge">` : ""}
            <div>App container: <span class="mono">${esc(f.value)}</span><br>${photoBadge(f)}<br>
@@ -592,11 +635,12 @@
         : `<button class="ghost xs" data-fill="${k}">Fill ${esc(FIELD[f.field] || f.field)} ← ${esc(f.value)}</button>`).join("")}</div>` : ""}
       <div class="row-actions">
         <button class="primary small-btn" id="dNexl" type="button">Open in Nexl ↗</button>
-        ${issues.some((i) => !i.ack) ? `<button class="ghost small-btn" id="dSnooze" type="button">👀 I'm on it</button>` : ""}
+        ${issues.some((i) => !i.ack) ? `<button class="ghost small-btn" id="dSnooze" type="button">👀 I'm on it</button><button class="ghost small-btn" id="dBypass" type="button">✔ Bypass</button>` : ""}
       </div>`;
     $("dClose").onclick = () => { box.hidden = true; state.selected = null; };
     $("dNexl").onclick = () => openNexl(word, d.container ? "container" : "instruction");
     if ($("dSnooze")) $("dSnooze").onclick = async () => { for (const i of issues.filter((x) => !x.ack)) await snooze(i); };
+    if ($("dBypass")) $("dBypass").onclick = () => bypass(issues.filter((x) => !x.ack));
     box.querySelectorAll("[data-fill]").forEach((b) => (b.onclick = () => doFill([d.fills[+b.dataset.fill]])));
     box.querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(d.fills[+b.dataset.ph])));
     if (!quiet) box.scrollIntoView({ block: "start", behavior: "smooth" });

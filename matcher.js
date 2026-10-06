@@ -337,22 +337,26 @@
       let open = 0;
       const parts = rowIssues.map((i) => {
         i.key = issueKey(i);
-        const ak = acks[i.key];
-        if (ak && ak.until > nowMs) { i.ack = ak; return `👀 ${ak.by}: ${i.short || shortIssue(i)}`; }
+        const ak = ackFor(i, acks, nowMs);
+        if (ak) {
+          i.ack = ak; i.bypass = ak.kind === "bypass";
+          return i.bypass ? `✔ ${ak.by} bypassed: ${i.short || shortIssue(i)}` : `👀 ${ak.by}: ${i.short || shortIssue(i)}`;
+        }
         open++;
         return i.short || shortIssue(i);
       });
       let level = "";
       if (rowIssues.some((i) => i.severity === "error" && !i.ack)) level = "error";
       else if (open) level = "warn";
-      else if (parts.length) level = "ack";
+      else if (rowIssues.some((i) => i.ack && !i.bypass)) level = "ack";
+      else if (parts.length) level = "ok"; // everything on the row was bypassed
       else if (n || r.tracking) level = "ok";
       rowStatus.push({ tab: r.tab, row: r.row, step: ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
       rows[r.tab + "|" + r.row] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
         nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor };
     }
     // Snooze state for issues that aren't tied to a row status (e.g. "In Nexl but not on the sheet").
-    for (const i of issues) if (!i.key) { i.key = issueKey(i); const ak = acks[i.key]; if (ak && ak.until > nowMs) i.ack = ak; }
+    for (const i of issues) if (!i.key) { i.key = issueKey(i); const ak = ackFor(i, acks, nowMs); if (ak) { i.ack = ak; i.bypass = ak.kind === "bypass"; } }
 
     const notOnPlan = [...instrById.values()].filter((i) => !groups.has(i.base));
     const order = { error: 0, warn: 1, info: 2 };
@@ -377,6 +381,18 @@
     return `${icon} ${m}`;
   }
   /** Stable id for an issue, used to snooze/acknowledge it across syncs. */
+  /** What the issue "looks like" right now. A bypass only holds while this stays the same. */
+  function issueFp(i) {
+    if (i.field === "progress") return "progress>" + (i.code || "");
+    return compact(i.sheet) + ">" + compact(i.nexl);
+  }
+  /** The ack (snooze or bypass) that applies to an issue, if any. */
+  function ackFor(i, acks, nowMs) {
+    const ak = acks[i.key];
+    if (!ak || !(ak.until > nowMs)) return null;
+    if (ak.kind === "bypass" && ak.fp !== issueFp(i)) return null; // values changed -> flag again
+    return ak;
+  }
   function issueKey(i) {
     return [i.ref ? i.ref.tab : "", i.ref ? i.ref.row : "", i.field, i.code || "", compact(i.container)].join("|");
   }
@@ -634,5 +650,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, shortIssue, parseStackDates, parseTransporters, cellDate };
+  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);

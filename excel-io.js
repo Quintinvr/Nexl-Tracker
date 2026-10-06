@@ -283,31 +283,36 @@
       used.load("values");
       await ctx.sync();
       if (used.isNullObject) return;
-      for (const [key, by, until, text] of used.values.slice(1)) {
+      for (const [key, by, until, text, kind, fp] of used.values.slice(1)) {
         const t = Date.parse(until);
-        if (key && t > Date.now()) out[key] = { by, until: t, text };
+        if (key && t > Date.now()) out[key] = { by, until: t, text, kind: kind || "snooze", fp: fp == null ? "" : String(fp).replace(/^'/, "") };
       }
     });
     return out;
   }
-  async function writeAck(key, by, minutes, text) {
+  /**
+   * Snooze (minutes > 0), bypass (opts.kind = "bypass", stays until the issue's values change) or clear (minutes = 0).
+   */
+  async function writeAck(key, by, minutes, text, opts = {}) {
     await Excel.run(async (ctx) => {
       let ws = ctx.workbook.worksheets.getItemOrNullObject(ACK_SHEET);
       await ctx.sync();
       if (ws.isNullObject) {
         ws = ctx.workbook.worksheets.add(ACK_SHEET);
         ws.visibility = "Hidden";
-        ws.getRange("A1:D1").values = [["Key", "By", "Until", "What"]];
       }
+      ws.getRange("A1:F1").values = [["Key", "By", "Until", "What / reason", "Type", "Values when bypassed"]];
       const used = ws.getUsedRange(true);
       used.load("values,rowCount");
       await ctx.sync();
       const now = Date.now();
       // Keep live entries only (drop expired ones and any older entry for this key).
-      const keep = used.values.slice(1).filter((r) => r[0] && r[0] !== key && Date.parse(r[2]) > now);
-      if (minutes > 0) keep.push([key, by, new Date(now + minutes * 60000).toISOString(), text || ""]);
-      ws.getRange(`A2:D${Math.max(used.rowCount, 2) + 1}`).clear("Contents");
-      if (keep.length) ws.getRange(`A2:D${keep.length + 1}`).values = keep;
+      const keep = used.values.slice(1).filter((r) => r[0] && r[0] !== key && Date.parse(r[2]) > now)
+        .map((r) => [r[0], r[1], r[2], r[3], r[4] || "snooze", r[5] == null || r[5] === "" ? "" : "'" + String(r[5]).replace(/^'/, "")]);
+      if (opts.kind === "bypass") keep.push([key, by, "2099-12-31T00:00:00.000Z", text || "", "bypass", "'" + (opts.fp || "")]);
+      else if (minutes > 0) keep.push([key, by, new Date(now + minutes * 60000).toISOString(), text || "", "snooze", ""]);
+      ws.getRange(`A2:F${Math.max(used.rowCount, 2) + 1}`).clear("Contents");
+      if (keep.length) ws.getRange(`A2:F${keep.length + 1}`).values = keep;
       await ctx.sync();
     });
   }
