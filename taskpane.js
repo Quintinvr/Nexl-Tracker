@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.8.3";
+  const VERSION = "1.8.4";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -450,6 +450,18 @@
     $("fillList").querySelectorAll("[data-apply]").forEach((b) => (b.onclick = () => doFill([fills[+b.dataset.apply]])));
   }
 
+  // ---------- team-aligned sync schedule ----------
+  const SLOT_CHOICES = [5, 10, 15, 30];
+  const slotMinutes = () => (SLOT_CHOICES.includes(+settings.minutes) ? +settings.minutes : 5);
+  function nextSlot(from = Date.now()) {
+    const ms = slotMinutes() * 60000;
+    return Math.floor(from / ms) * ms + ms; // next whole 5-minute mark on the clock
+  }
+  function showNextSync() {
+    const el = $("nextSync"); if (!el) return;
+    el.textContent = settings.auto && state.nextSlot ? `· next ${fmtTime(new Date(state.nextSlot))}` : "";
+  }
+
   // ---------- voice greeting (browser's built-in speech, once a day) ----------
   const dayPart = (d = new Date()) => (d.getHours() < 12 ? "morning" : d.getHours() < 17 ? "afternoon" : "evening");
   const todayStr = () => new Date().toDateString();
@@ -862,7 +874,9 @@
     bind("sVoice", "voice");
     $("voiceTest").addEventListener("click", (e) => { e.preventDefault(); speak(greetingText()); });
     bind("sAuto", "auto");
-    bind("sMinutes", "minutes", "value", (v) => Math.max(2, Math.min(60, +v || CFG.refreshMinutes)));
+    bind("sMinutes", "minutes", "value", (v) => (SLOT_CHOICES.includes(+v) ? +v : 5));
+    $("sMinutes").addEventListener("change", () => { state.nextSlot = nextSlot(); showNextSync(); });
+    $("sAuto").addEventListener("change", () => { state.nextSlot = nextSlot(); showNextSync(); });
     bind("sSnoozeMin", "snoozeMin", "value", (v) => Math.max(10, Math.min(480, +v || 60)));
     bind("sStatusCols", "statusCols");
     bind("sNotes", "notes");
@@ -937,9 +951,16 @@
     ExcelIO.watchSelection(CFG.tabs.map((t) => t.name), (tab, row) => showDetail(tab, row, true)).catch(() => {});
     sync();
 
+    // Team-aligned auto-refresh: everyone syncs on the same clock slots (e.g. 10:00, 10:05, 10:10 ...),
+    // so all panels and the sheet show the same picture at the same time. Keeps running while the panel is hidden.
+    state.nextSlot = nextSlot();
+    showNextSync();
     setInterval(() => {
-      if (!settings.auto || state.busy || document.visibilityState === "hidden") return;
-      if (Date.now() - state.lastSyncAt >= settings.minutes * 60000) sync();
-    }, 20000);
+      if (!settings.auto) return;
+      if (Date.now() < state.nextSlot) return;
+      if (state.busy) return; // a sync is running: catch the slot as soon as it finishes
+      state.nextSlot = nextSlot();
+      sync().finally(showNextSync);
+    }, 5000);
   });
 })();

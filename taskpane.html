@@ -46,7 +46,7 @@
   <div class="statusbar">
     <span class="pill" id="bridgePill"><i></i><span>Bridge</span></span>
     <span class="pill" id="nexlPill"><i></i><span>Nexl</span></span>
-    <span class="muted" id="lastSync">Not synced yet</span>
+    <span class="muted"><span id="lastSync">Not synced yet</span> <span id="nextSync"></span></span>
   </div>
 
   <div id="banner" class="banner" hidden></div>
@@ -141,7 +141,9 @@
       <label class="check"><input type="checkbox" id="sVoice"> 🔊 Say good morning / afternoon / evening with my name (once a day)
         <button id="voiceTest" class="ghost xs" type="button">▶ Test</button></label>
       <label class="check"><input type="checkbox" id="sPopUp"> When the panel is hidden, pop it back open on a new red error</label>
-      <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every <input type="number" id="sMinutes" min="2" max="60" step="1"> min</label>
+      <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every
+        <select id="sMinutes"><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="30">30</option></select> min
+        <span class="muted small">— on the clock (:00, :05, :10…), the same for the whole team</span></label>
       <label class="check">Snooze alerts for <input type="number" id="sSnoozeMin" min="10" max="480" step="10"> min</label>
       <label class="check"><input type="checkbox" id="sStatusCols"> Show <b>NEXL STEP</b> / <b>NEXL ALERT</b> columns on the plan tabs</label>
       <label class="check"><input type="checkbox" id="sNotes"> Add a note on cells that differ from Nexl</label>
