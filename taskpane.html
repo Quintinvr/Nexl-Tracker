@@ -133,11 +133,13 @@
     </section>
 
     <section id="view-settings" class="view" hidden>
-      <label class="field">Your name (shown when you snooze an alert)
+      <label class="field">Your name (for the greeting and when you snooze or bypass)
         <input type="text" id="sName" maxlength="24" placeholder="e.g. Quintin">
       </label>
       <label class="check"><input type="checkbox" id="sAutoOpen"> Open Nexl Check automatically with this workbook</label>
       <label class="check"><input type="checkbox" id="sSplash"> Show the start-up animation</label>
+      <label class="check"><input type="checkbox" id="sVoice"> 🔊 Say good morning / afternoon / evening with my name (once a day)
+        <button id="voiceTest" class="ghost xs" type="button">▶ Test</button></label>
       <label class="check"><input type="checkbox" id="sPopUp"> When the panel is hidden, pop it back open on a new red error</label>
       <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every <input type="number" id="sMinutes" min="2" max="60" step="1"> min</label>
       <label class="check">Snooze alerts for <input type="number" id="sSnoozeMin" min="10" max="480" step="10"> min</label>
