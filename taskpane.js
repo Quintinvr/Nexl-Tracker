@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.5.0";
+  const VERSION = "1.6.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -252,10 +252,19 @@
     };
   }
 
-  async function openNexl(word, filter) {
-    const w = String(word || "").trim();
+  // Which Nexl screen an instruction lives on (Active / Completed), from the last sync.
+  function screenFor(id) {
+    const list = (state.input && state.input.nexl && state.input.nexl.instructions) || [];
+    const b = String(id || "").split(".")[0];
+    const hit = list.find((x) => x.id === String(id)) || list.find((x) => x.base === b);
+    return hit && /complete/i.test(hit.state || "") ? "completed" : "active";
+  }
+  async function openNexl(word, filter, instruction) {
+    const w = String(word || instruction || "").trim();
     if (!w) return;
-    const r = await NexlClient.openInNexl(filter, w);
+    const ins = /^\d{3,8}(\.\d{1,2})?$/.test(String(instruction || "")) ? String(instruction) : null;
+    toast(ins ? `Opening ${ins} in Nexl…` : `Searching Nexl for ${w}…`);
+    const r = await NexlClient.openInNexl(filter, w, ins, ins ? screenFor(ins) : null);
     if (r.ok) return;
     if (r.error === "NOT_LOGGED_IN") { toast("Log in to Nexl first, then try again."); return; }
     // Older bridge (1.0) or blocked: copy + open Nexl so the user can paste into Nexl's search.
@@ -321,7 +330,7 @@
       <div class="row-actions">${fillAllowed(f) ? `<button id="phApply" class="primary small-btn" type="button">Apply to ${esc(f.tab)} ${esc(f.col + f.row)}</button>` : ""}
       <button id="phNexl" class="ghost small-btn" type="button">Open in Nexl ↗</button></div>`);
     if ($("phApply")) $("phApply").onclick = () => { closeModal(); doFill([f]); };
-    $("phNexl").onclick = () => openNexl(f.instruction, "instruction");
+    $("phNexl").onclick = () => openNexl(f.instruction, "instruction", f.instruction);
   }
   function renderFills() {
     const res = state.result; if (!res) return;
@@ -410,7 +419,7 @@
         if (act === "snooze") { e.stopPropagation(); snooze(i); return; }
         if (act === "bypass") { e.stopPropagation(); bypass([i]); return; }
         if (act === "unsnooze") { e.stopPropagation(); snooze(i, 0); return; }
-        if (act === "nexl") { e.stopPropagation(); openNexl(e.target.dataset.word, e.target.dataset.filter); return; }
+        if (act === "nexl") { e.stopPropagation(); openNexl(e.target.dataset.word, e.target.dataset.filter, i.instruction); return; }
         if (i.ref) { ExcelIO.goTo(i.ref).catch(() => {}); showDetail(i.ref.tab, i.ref.row); }
       });
     });
@@ -638,7 +647,7 @@
         ${issues.some((i) => !i.ack) ? `<button class="ghost small-btn" id="dSnooze" type="button">👀 I'm on it</button><button class="ghost small-btn" id="dBypass" type="button">✔ Bypass</button>` : ""}
       </div>`;
     $("dClose").onclick = () => { box.hidden = true; state.selected = null; };
-    $("dNexl").onclick = () => openNexl(word, d.container ? "container" : "instruction");
+    $("dNexl").onclick = () => openNexl(word, d.container ? "container" : "instruction", d.id);
     if ($("dSnooze")) $("dSnooze").onclick = async () => { for (const i of issues.filter((x) => !x.ack)) await snooze(i); };
     if ($("dBypass")) $("dBypass").onclick = () => bypass(issues.filter((x) => !x.ack));
     box.querySelectorAll("[data-fill]").forEach((b) => (b.onclick = () => doFill([d.fills[+b.dataset.fill]])));

@@ -34,8 +34,9 @@
   }
 
   /** Focus Nexl and run its search. Needs bridge 1.1+; older bridges answer UNKNOWN_REQUEST. */
-  function openInNexl(filter, word) {
-    return send("open", "", 30000, { filter, word });
+  /** Bridge 1.3+: with an instruction number, opens it from Active/Completed Instructions like a controller would. */
+  function openInNexl(filter, word, instruction, screen) {
+    return send("open", "", 60000, { filter, word, instruction: instruction || null, screen: screen || null });
   }
 
   class NexlError extends Error {
