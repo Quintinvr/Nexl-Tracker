@@ -51,6 +51,10 @@
     return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dt.getDay()]} ${String(d).padStart(2, "0")} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]}`;
   }
 
+  // Comments that are just a status word (already shown as the status) are not repeated as a comment line.
+  const STATUS_WORD = /^(STACKED|STACK(ED)? IN|DEPARTED|LOADED|YARD|IN YARD|COLLECTED|DELIVERED|GATED ?(IN|OUT)|IN TRANSIT|ON ROUTE|EN ROUTE|PLUGGED( IN)?|GROUNDED|PACKED|PACKING|EMPTY|DONE|COMPLETED?|ARRIVED|OFFLOADED|AT PORT|SHIPPED|SAILED|ON BOARD|ONBOARD|BOOKED|ALLOCATED|DISPATCHED|RELEASED|CANCELL?ED|ROLLED|TBC|OK|N\/?A)\.?$/i;
+  const isStatusWord = (t) => STATUS_WORD.test(String(t || "").trim());
+
   function buildLoads(grid, cols, rows, tabName) {
     const get = (r, f) => (cols[f] === undefined ? "" : clean(r[cols[f]]));
     const loads = [];
@@ -62,17 +66,19 @@
       if (!client || (!loadRef && !container)) return; // date banners / empty rows
       const d = rows ? rows[`${tabName}|${i + 1}`] : null;
       const live = liveStatus(d);
-      const sheet = get(r, "comment") || get(r, "navis");
+      const comment = get(r, "comment");
+      const sheet = comment || get(r, "navis");
       // Live progress wins while a truck is on it; once complete, the sheet's own wording (e.g. STACKED) wins.
-      let status, icon;
-      if (live && !live.completed) { status = live.text; icon = live.icon; }
+      // The controller's COMMENT is still passed on underneath the live status (unless it's just a status word).
+      let status, icon, remark = "";
+      if (live && !live.completed) { status = live.text; icon = live.icon; if (comment && !isStatusWord(comment)) remark = comment; }
       else if (sheet) { status = sheet; icon = live ? live.icon : "🔹"; }
       else if (live) { status = live.text; icon = live.icon; }
       else { status = "Awaiting update"; icon = "⏳"; }
       loads.push({
         id: `${tabName}|${i + 1}`, row: i + 1, client, clientKey: compact(client),
         vessel: get(r, "vessel"), loadRef: loadRef || container, container, seal: get(r, "seal"),
-        tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed),
+        tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed), remark,
         date: cols.loadDate === undefined ? "" : dateKey(r[cols.loadDate]),
       });
     });
@@ -119,6 +125,7 @@
       for (const l of list) {
         out.push("", `${e ? "🔹 " : ""}${bold(l.loadRef)}${sep}${l.status}`);
         const extra = [
+          l.remark && `Comment: ${l.remark}`, // controller's comment: always included
           f.container && l.container && `Container: ${l.container}`,
           f.seal && l.seal && `Seal: ${l.seal}`,
           f.tare && l.tare && `Tare: ${l.tare}`,
@@ -131,5 +138,5 @@
     return out.join("\n");
   }
 
-  root.NexlWhatsApp = { dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
+  root.NexlWhatsApp = { isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.8.6";
+  const VERSION = "1.8.7";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -746,7 +746,7 @@
           <div class="wa-load${l.live ? " live" : ""}">
             <input type="checkbox" data-id="${esc(l.id)}" ${state.waUnticked.has(l.id) ? "" : "checked"} aria-label="Include ${esc(l.loadRef)}">
             <span class="wa-ref mono">${esc(l.loadRef)}</span>
-            <span class="wa-st">${esc(l.status)}</span>
+            <span class="wa-st">${esc(l.status)}${l.remark ? `<br><span class="wa-rem">💬 ${esc(l.remark)}</span>` : ""}</span>
             <button class="ghost xs wa-one" data-id="${esc(l.id)}" type="button" title="Copy an update for just this load">Copy</button>
           </div>`).join("")).join("")}
         <textarea class="full wa-msg" rows="${Math.min(12, msg.split("\n").length + 1)}" placeholder="Tick at least one load">${esc(msg)}</textarea>

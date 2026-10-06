@@ -244,3 +244,4 @@ select option, select optgroup { color: var(--text); background-color: var(--bg)
 select option:checked { background-color: var(--accent); color: var(--accent-ink); }
 .wa-date select { font-weight: 600; padding: 6px 8px; background-color: var(--bg2); }
 select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wa-rem { font-size: 11.5px; color: var(--muted); font-style: italic; }
