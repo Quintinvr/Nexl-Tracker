@@ -4,14 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.8.5";
+  const VERSION = "1.8.6";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true, voice: true, greetedOn: "",
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true,
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
@@ -150,7 +150,6 @@
       runPhotoChecks();
       runSlipChecks();
       popOnNewErrors();
-      greetOnce();
       rememberLegs(res.legSamples);
 
       if (settings.writeTab) {
@@ -200,7 +199,7 @@
   async function ensureName() {
     if (settings.name) return settings.name;
     return new Promise((resolve) => {
-      modal("Who's on it?", `<p class="small">Nexl Check greets you by name and shows it to the team next to alerts you snooze or bypass.</p>
+      modal("Who's on it?", `<p class="small">Your name is shown to the team next to alerts you snooze or bypass.</p>
         <input id="nameIn" type="text" maxlength="24" placeholder="Your name" class="full">
         <div class="row-actions"><button id="nameOk" class="primary small-btn" type="button">Save</button></div>`);
       const go = () => { const v = $("nameIn").value.trim(); if (!v) return; settings.name = v; $("sName").value = v; saveSettings(); closeModal(); resolve(v); };
@@ -460,49 +459,6 @@
   function showNextSync() {
     const el = $("nextSync"); if (!el) return;
     el.textContent = settings.auto && state.nextSlot ? `· next ${fmtTime(new Date(state.nextSlot))}` : "";
-  }
-
-  // ---------- voice greeting (browser's built-in speech, once a day) ----------
-  const dayPart = (d = new Date()) => (d.getHours() < 12 ? "morning" : d.getHours() < 17 ? "afternoon" : "evening");
-  const todayStr = () => new Date().toDateString();
-  function pickVoice() {
-    const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
-    const by = (re) => vs.find((v) => re.test(v.lang) && /natural|online|neural/i.test(v.name)) || vs.find((v) => re.test(v.lang));
-    return by(/^en-ZA/i) || by(/^en-GB/i) || by(/^en-(US|AU|IE)/i) || by(/^en/i) || null;
-  }
-  function greetingText() {
-    const name = (settings.name || "").trim();
-    let t = `Good ${dayPart()}${name ? ", " + name : ""}.`;
-    const res = state.result;
-    if (res) {
-      const open = res.issues.filter((i) => !i.ack && i.severity !== "info");
-      const err = open.filter((i) => i.severity === "error").length;
-      const risk = (res.cutoffs || []).reduce((a, c) => a + (c.hoursLeft > 0 ? c.atRisk || 0 : 0), 0);
-      t += err ? ` Nexl Check is up to date. ${err} error${err === 1 ? "" : "s"} need${err === 1 ? "s" : ""} attention.` : " Nexl Check is up to date. No errors right now.";
-      if (risk) t += ` ${risk} load${risk === 1 ? " is" : "s are"} at risk of missing the vessel cutoff.`;
-    } else t += " Nexl Check is starting up.";
-    return t;
-  }
-  let pendingSpeech = null;
-  function speak(text, onDone) {
-    if (!("speechSynthesis" in window)) { onDone && onDone(false); return; }
-    const go = () => {
-      const u = new SpeechSynthesisUtterance(text);
-      const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-ZA";
-      u.rate = 1; u.pitch = 1; u.volume = 1;
-      u.onstart = () => { pendingSpeech = null; onDone && onDone(true); };
-      // Browsers block speech until the user has clicked once: then speak on the first click in the panel.
-      u.onerror = (e) => { if (e.error === "not-allowed") pendingSpeech = { text, onDone }; };
-      try { speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) { pendingSpeech = { text, onDone }; }
-    };
-    if (speechSynthesis.getVoices().length) go();
-    else { let done = false; const once = () => { if (!done) { done = true; go(); } }; speechSynthesis.onvoiceschanged = once; setTimeout(once, 800); }
-  }
-  document.addEventListener("pointerdown", () => { if (pendingSpeech) { const p = pendingSpeech; pendingSpeech = null; speak(p.text, p.onDone); } }, true);
-  async function greetOnce() {
-    if (!settings.voice || settings.greetedOn === todayStr()) return;
-    if (!settings.name) await ensureName(); // first time: ask the name once (that click also unlocks the voice)
-    speak(greetingText(), (ok) => { if (ok) { settings.greetedOn = todayStr(); saveSettings(); } });
   }
 
   // ---------- hide panel (shared runtime keeps syncing while hidden) ----------
@@ -902,8 +858,6 @@
     bind("sName", "name", "value", (v) => v.trim());
     bind("sSplash", "splash");
     bind("sPopUp", "popUp");
-    bind("sVoice", "voice");
-    $("voiceTest").addEventListener("click", (e) => { e.preventDefault(); speak(greetingText()); });
     bind("sAuto", "auto");
     bind("sMinutes", "minutes", "value", (v) => (SLOT_CHOICES.includes(+v) ? +v : 5));
     $("sMinutes").addEventListener("change", () => { state.nextSlot = nextSlot(); showNextSync(); });

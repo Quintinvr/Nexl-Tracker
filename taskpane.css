@@ -1,12 +1,13 @@
 [hidden] { display: none !important; }
 :root {
+  color-scheme: light;
   --bg: #ffffff; --bg2: #f6f8fa; --line: #d8dee4; --text: #1f2328; --muted: #59636e;
   --accent: #0f6cbd; --accent-ink: #ffffff;
   --err: #cf222e; --err-bg: #ffebe9; --warn: #9a6700; --warn-bg: #fff8c5; --info: #0969da; --info-bg: #ddf4ff;
   --ok: #1a7f37; --ok-bg: #dafbe1;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #1f1f1f; --bg2: #292929; --line: #3d3d3d; --text: #e6edf3; --muted: #9da7b1;
+  :root { color-scheme: dark; --bg: #1f1f1f; --bg2: #292929; --line: #3d3d3d; --text: #e6edf3; --muted: #9da7b1;
     --accent: #479ef5; --accent-ink: #0b0b0b; --err: #ff7b72; --err-bg: #3d1a1a; --warn: #e3b341; --warn-bg: #3a2f10;
     --info: #79c0ff; --info-bg: #10263d; --ok: #56d364; --ok-bg: #12301b; }
 }
@@ -236,3 +237,10 @@ dd.late { color: #c00000; font-weight: 600; }
 .wa-date { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
 .wa-date[hidden] { display: none; }
 .wa-date select { flex: 1; min-width: 0; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line, #ccc); font-size: 12.5px; }
+
+/* Readable form controls in light AND dark mode (drop-down lists included) */
+select, input[type=text], input[type=number], textarea { color: var(--text); background-color: var(--bg); border-color: var(--line); font-family: inherit; }
+select option, select optgroup { color: var(--text); background-color: var(--bg); }
+select option:checked { background-color: var(--accent); color: var(--accent-ink); }
+.wa-date select { font-weight: 600; padding: 6px 8px; background-color: var(--bg2); }
+select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
