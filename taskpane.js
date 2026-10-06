@@ -4,14 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.6.1";
+  const VERSION = "1.7.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false,
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, mini: false,
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
@@ -19,7 +19,7 @@
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
 
   // ---------- state ----------
-  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(),
+  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(), slips: {}, sealOk: new Set(),
     extras: {}, waGrid: null, waUnticked: new Set(), waEdits: {} };
   const fmtTime = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const fmtStamp = (d) => d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -93,7 +93,7 @@
   // ---------- sync ----------
   function matchOpts() {
     return { now: new Date(), notStartedMinutes: settings.notStarted, stuckMinutes: settings.stuck, acks: state.acks,
-      extras: state.extras, cutoffWarnHours: settings.cutoffH, pingSilentMinutes: settings.silent };
+      extras: state.extras, cutoffWarnHours: settings.cutoffH, pingSilentMinutes: settings.silent, slips: state.slips, legHistory: loadLegs() };
   }
 
   async function sync() {
@@ -148,6 +148,8 @@
       render();
       hideSplash();
       runPhotoChecks();
+      runSlipChecks();
+      rememberLegs(res.legSamples);
 
       if (settings.writeTab) {
         progress(0.96, `Updating ${CFG.checkTabName} tab…`);
@@ -210,9 +212,10 @@
     const by = await ensureName();
     const m = minutes == null ? settings.snoozeMin : minutes;
     try {
-      await ExcelIO.writeAck(issue.key, by, m, issue.message);
+      const wide = !m && issue.ack && /^INSTR\|/.test(issue.ack.key || "");
+      await ExcelIO.writeAck(!m && issue.ack && issue.ack.key ? issue.ack.key : issue.key, by, m, issue.message);
       state.acks = await ExcelIO.readAcks();
-      toast(m ? `Snoozed for ${m} min — the team sees "👀 ${by}"` : issue.bypass ? "Bypass undone — the alert is back" : "Snooze removed");
+      toast(m ? `Snoozed for ${m} min — the team sees "👀 ${by}"` : wide ? `Bypass undone on every row of ${issue.instruction}` : issue.bypass ? "Bypass undone — the alert is back" : "Snooze removed");
       await recompute();
       if (!m && issue.bypass && settings.notes) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
     } catch (e) { toast("Couldn't save the snooze: " + e.message); }
@@ -226,8 +229,15 @@
     if (!list.length) return;
     const by = await ensureName();
     const what = list.length === 1 ? esc(list[0].message) : `${list.length} alerts on this row`;
+    // Same alert on other rows of this instruction (e.g. vessel differs on every row of 86888)?
+    const one = list.length === 1 ? list[0] : null;
+    const iKey = one && one.instruction && one.field !== "progress" ? NexlMatcher.instrKey(one) : null;
+    const same = iKey ? state.result.issues.filter((x) => !x.ack && x.instruction && NexlMatcher.instrKey(x) === iKey && NexlMatcher.instrFp(x) === NexlMatcher.instrFp(one)) : [];
+    const base = one ? String(one.instruction).split(".")[0] : "";
     modal("Bypass alert", `<p class="small"><b>${what}</b></p>
       <p class="small muted">The alert is cleared for the whole team and comes back only if the sheet or Nexl value changes.</p>
+      ${iKey ? `<label class="small wide-opt"><input type="checkbox" id="bpWide" ${same.length > 1 ? "checked" : ""}>
+        Bypass this <b>${esc(FIELD[one.field] || one.field)}</b> alert on <b>every row of instruction ${esc(base)}</b>${same.length > 1 ? ` (${same.length} rows now)` : ""} where the sheet says <b>${esc(one.sheet || "(blank)")}</b>, including rows added later</label>` : ""}
       <div class="reasons">${BYPASS_REASONS.map((r, k) => `<label class="small"><input type="radio" name="bpWhy" value="${esc(r)}" ${k === 0 ? "checked" : ""}> ${esc(r)}</label>`).join("")}
       <label class="small"><input type="radio" name="bpWhy" value=""> Other:</label></div>
       <input id="bpText" type="text" maxlength="80" placeholder="Note (optional)" class="full">
@@ -241,11 +251,14 @@
       const note = $("bpText").value.trim();
       const reason = [pick, note].filter(Boolean).join(" — ").replace(/^[=+\-@]/, "'$&");
       if (!reason) { $("bpText").focus(); toast("Add a short note for 'Other'."); return; }
+      const wideChecked = !!(iKey && $("bpWide") && $("bpWide").checked);
       closeModal();
       try {
-        for (const i of list) await ExcelIO.writeAck(i.key, by, 0, reason, { kind: "bypass", fp: NexlMatcher.issueFp(i) });
+        const wide = wideChecked;
+        if (wide) await ExcelIO.writeAck(iKey, by, 0, reason, { kind: "bypass", fp: NexlMatcher.instrFp(one) });
+        else for (const i of list) await ExcelIO.writeAck(i.key, by, 0, reason, { kind: "bypass", fp: NexlMatcher.issueFp(i) });
         state.acks = await ExcelIO.readAcks();
-        toast(`✔ Bypassed ${list.length === 1 ? "alert" : list.length + " alerts"} — the team sees "✔ ${by}"`);
+        toast(wide ? `✔ Bypassed on every row of ${base}${same.length > 1 ? ` (${same.length} rows)` : ""}` : `✔ Bypassed ${list.length === 1 ? "alert" : list.length + " alerts"} — the team sees "✔ ${by}"`);
         await recompute();
         if (settings.notes) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
       } catch (e) { toast("Couldn't save the bypass: " + e.message); }
@@ -298,14 +311,15 @@
   // CONTAINER photo in Nexl has been read and shows the same number.
   const photoKey = (f) => `${f.nexlRowId || "-"}|${f.value}`;
   const photoOf = (f) => (f.needsPhoto ? state.photo.get(photoKey(f)) || { status: "checking" } : null);
-  const fillAllowed = (f) => !f.needsPhoto || photoOf(f).status === "match";
+  const fillAllowed = (f) => !f.needsPhoto || (f.photoKind === "seal" ? state.sealOk.has(photoKey(f)) : photoOf(f).status === "match");
   const PHOTO_BADGE = {
     checking: ["⏳", "Checking photo…", "chk"], match: ["✓", "Photo matches", "ok"], mismatch: ["✗", "Photo shows a different number", "bad"],
     unreadable: ["?", "Photo unclear — check by eye", "warn"], invalid: ["✗", "App number looks mistyped", "bad"],
-    nophoto: ["📷", "No container photo yet", "warn"], norow: ["?", "Can't find this container's photos in Nexl", "warn"], error: ["!", "Photo check failed", "warn"],
+    manual: ["👁", "Check the seal photo", "chk"], sealok: ["✓", "Seal photo checked", "ok"],
+    nophoto: ["📷", "No photo uploaded yet", "warn"], norow: ["?", "Can't find this container's photos in Nexl", "warn"], error: ["!", "Photo check failed", "warn"],
   };
   function photoBadge(f) {
-    const p = photoOf(f); if (!p) return "";
+    const p = f.photoKind === "seal" && state.sealOk.has(photoKey(f)) ? { status: "sealok" } : photoOf(f); if (!p) return "";
     const [ic, txt, cls] = PHOTO_BADGE[p.status] || PHOTO_BADGE.error;
     return `<span class="pbadge ${cls}" title="${esc(p.detail || txt)}">${ic} ${esc(txt)}</span>`;
   }
@@ -317,7 +331,7 @@
       if (state.photo.has(k)) continue;
       if (!f.nexlRowId) { state.photo.set(k, { status: "norow", detail: "Nexl didn't give a row for this container, so its photos can't be opened" }); continue; }
       state.photo.set(k, { status: "checking" });
-      NexlPhotoCheck.check(f).then((r) => {
+      (f.photoKind === "seal" ? NexlPhotoCheck.sealPhoto(f.nexlRowId).catch((e) => ({ status: "error", detail: String(e.message || e) })) : NexlPhotoCheck.check(f)).then((r) => {
         state.photo.set(k, r);
         if (r.status === "error") setTimeout(() => state.photo.get(k) === r && state.photo.delete(k), 60000); // retry on a later sync
         renderFills();
@@ -325,7 +339,84 @@
       });
     }
   }
+  // Leg times remembered on this PC (last 300 stop-to-stop times) so "Will it make the vessel?" learns your routes.
+  const LEG_KEY = "nexlcheck.legs.v1";
+  function loadLegs() { try { return JSON.parse(localStorage.getItem(LEG_KEY) || "[]"); } catch (e) { return []; } }
+  function rememberLegs(samples) {
+    if (!samples || !samples.length) return;
+    try {
+      const have = loadLegs(), ids = new Set(have.map((x) => x.id));
+      const merged = have.concat(samples.filter((x) => !ids.has(x.id)).map((x) => ({ id: x.id, m: x.m }))).slice(-300);
+      localStorage.setItem(LEG_KEY, JSON.stringify(merged));
+    } catch (e) { /* storage off: fine, falls back to today's data */ }
+  }
+  // Port slips: for rows with an empty status cell, look for a port slip photo in Nexl.
+  async function runSlipChecks() {
+    const res = state.result;
+    if (!res || !window.NexlPhotoCheck || !res.slipCandidates || !res.slipCandidates.length) return;
+    const list = res.slipCandidates.slice(0, 40);
+    let found = 0, i = 0;
+    const work = async () => {
+      while (i < list.length) {
+        const c = list[i++];
+        try { const up = await NexlPhotoCheck.uploads(c.rowId); if (up.psli && !state.slips[c.key]) { state.slips[c.key] = { path: up.psli }; found++; } }
+        catch (e) { if (e.code === "NOT_LOGGED_IN") return; }
+      }
+    };
+    await Promise.all([work(), work(), work()]);
+    if (found && state.input) {
+      state.result = NexlMatcher.compare(state.input.usable, state.input.nexl, matchOpts());
+      render();
+      runPhotoChecks();
+    }
+  }
+  async function showSlip(f) {
+    modal(`Port slip · ${f.container || f.instruction}`, `<p class="small">Loading the port slip…</p>`);
+    try {
+      const img = await NexlPhotoCheck.image(f.slipPath);
+      modal(`Port slip · ${f.container || f.instruction}`, `<img class="cphoto" src="${esc(img)}" alt="Port slip">
+        <p class="small">The driver uploaded a port slip, so this ${f.slipKind === "collected" ? "import was <b>collected from the port</b>" : "export is <b>stacked at the port</b>"}.</p>
+        ${f.value && f.col ? `<div class="row-actions"><button id="slApply" class="primary small-btn" type="button">Put ${esc(f.value)} in ${esc(f.tab)} ${esc(f.col + f.row)}</button></div>` : ""}`);
+      if ($("slApply")) $("slApply").onclick = () => { closeModal(); doFill([f]); };
+    } catch (e) { modal("Port slip", `<p class="small">Couldn't load the photo: ${esc(e.message || e)}</p>`); }
+  }
+  function showSealPhoto(f) {
+    const p = photoOf(f) || {};
+    modal(`Seal photo · ${f.container || f.instruction}`, `${p.photo ? `<img class="cphoto" src="${esc(p.photo)}" alt="Seal photo">` : `<p class="small">${esc(p.detail || "No photo loaded.")}</p>`}
+      <p class="small">Nexl says the seal is <b class="mono big-seal">${esc(f.value)}</b>. Does the photo show this number?</p>
+      <div class="row-actions">${p.photo ? `<button id="seYes" class="primary small-btn" type="button">✓ Yes — put it in ${esc(f.tab)} ${esc(f.col + f.row)}</button>
+      <button id="seNo" class="ghost small-btn" type="button">✗ No / can't tell</button>` : ""}</div>`);
+    if ($("seYes")) $("seYes").onclick = () => { state.sealOk.add(photoKey(f)); closeModal(); doFill([f]); };
+    if ($("seNo")) $("seNo").onclick = () => { closeModal(); toast("Left blank. Check the seal with the driver or in Nexl."); };
+  }
+  // A seal that differs between sheet and Nexl: show the photo and let the controller decide.
+  async function sealIssuePhoto(i) {
+    const d = state.result.rows[i.ref.tab + "|" + i.ref.row];
+    const rowId = d && d.nexl && d.nexl.rowId;
+    if (!rowId) { toast("Can't find this container's photos in Nexl."); return; }
+    modal("Seal photo", `<p class="small">Loading the seal photo…</p>`);
+    const r = await NexlPhotoCheck.sealPhoto(rowId).catch((e) => ({ status: "error", detail: String(e.message || e) }));
+    modal(`Seal photo · ${i.container}`, `${r.photo ? `<img class="cphoto" src="${esc(r.photo)}" alt="Seal photo">` : `<p class="small">${esc(r.detail || "No photo.")}</p>`}
+      <p class="small">Sheet: <b class="mono">${esc(i.sheet)}</b> · Nexl: <b class="mono">${esc(i.nexl)}</b><br>Which one does the photo show?</p>
+      <div class="row-actions">${r.photo ? `<button id="spSheet" class="ghost small-btn" type="button">Sheet is right (${esc(i.sheet)})</button>
+      <button id="spNexl" class="ghost small-btn" type="button">Nexl is right (${esc(i.nexl)})</button>` : ""}</div>`);
+    if ($("spSheet")) $("spSheet").onclick = async () => {
+      closeModal();
+      const by = await ensureName();
+      await ExcelIO.writeAck(i.key, by, 0, `Seal photo shows ${i.sheet} (Nexl needs correcting)`, { kind: "bypass", fp: NexlMatcher.issueFp(i) });
+      state.acks = await ExcelIO.readAcks();
+      toast(`✔ Bypassed — seal photo shows ${i.sheet}. Remember to correct Nexl.`);
+      await recompute();
+    };
+    if ($("spNexl")) $("spNexl").onclick = async () => {
+      closeModal();
+      const ok = await ExcelIO.replaceCell({ tab: i.ref.tab, row: i.ref.row, col: i.ref.col, value: i.nexl }, i.sheet).catch(() => false);
+      toast(ok ? `Seal in ${i.ref.tab} ${i.ref.col}${i.ref.row} changed to ${i.nexl}.` : "The cell changed since the last sync — not overwritten. Sync and try again.");
+      if (ok) setTimeout(sync, 400);
+    };
+  }
   function showPhoto(f) {
+    if (f.photoKind === "seal") return showSealPhoto(f);
     const p = photoOf(f) || {};
     modal(`Photo · ${f.value}`, `${p.photo ? `<img class="cphoto" src="${esc(p.photo)}" alt="Container photo">` : `<p class="small">No photo loaded.</p>`}
       <p class="small">${photoBadge(f)}</p><p class="small">${esc(p.detail || "")}</p>
@@ -347,17 +438,44 @@
       return `<div class="fill ${f.needsPhoto ? "photo" : ""}">${ok ? `<input type="checkbox" data-k="${k}" ${state.fillSel.has(k) ? "checked" : ""}>` : `<span class="nocb">🔒</span>`}
       <span><b>${esc(f.tab)} ${esc(f.col + f.row)}</b> · ${esc(FIELD[f.field] || f.field)} ← <span class="mono">${esc(f.value)}</span>
       <span class="muted">(${esc(f.instruction)} ${esc(f.container || "")})</span>
-      ${f.needsPhoto ? `<br>${photoBadge(f)} ${p && p.photo ? `<button class="link xs" data-ph="${k}" type="button">View photo</button>` : ""}
-        ${ok ? `<button class="primary xs" data-apply="${k}" type="button">Apply</button>` : ""}` : ""}</span></div>`;
+      ${f.needsPhoto ? `<br>${photoBadge(f)} ${p && p.photo ? `<button class="link xs" data-ph="${k}" type="button">${f.photoKind === "seal" && !ok ? "Check seal photo" : "View photo"}</button>` : ""}
+        ${ok ? `<button class="primary xs" data-apply="${k}" type="button">Apply</button>` : ""}` : ""}
+      ${f.slipPath ? `<br><span class="pbadge ok">📄 Port slip uploaded</span> <button class="link xs" data-slip="${k}" type="button">View slip</button>` : ""}</span></div>`;
     }).join("");
     $("fillList").querySelectorAll("input").forEach((cb) => cb.onchange = () => { const k = +cb.dataset.k; cb.checked ? state.fillSel.add(k) : state.fillSel.delete(k); });
     $("fillList").querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(fills[+b.dataset.ph])));
+    $("fillList").querySelectorAll("[data-slip]").forEach((b) => (b.onclick = () => showSlip(fills[+b.dataset.slip])));
     $("fillList").querySelectorAll("[data-apply]").forEach((b) => (b.onclick = () => doFill([fills[+b.dataset.apply]])));
+  }
+
+  // ---------- minimal view ----------
+  function applyMini() {
+    document.body.classList.toggle("mini-on", !!settings.mini);
+    $("mini").hidden = !settings.mini;
+    $("miniBtn").textContent = settings.mini ? "⤢ Full" : "▁ Mini";
+    $("miniBtn").title = settings.mini ? "Back to the full panel" : "Minimal view: just the counts and the urgent alerts, so the panel can be made narrow";
+    if (settings.mini) renderMini();
+  }
+  function renderMini() {
+    const res = state.result;
+    $("mSync").textContent = $("lastSync").textContent.replace("Synced ", "⟳ ");
+    if (!res) return;
+    const open = res.issues.filter((i) => !i.ack && i.severity !== "info");
+    $("mErr").textContent = open.filter((i) => i.severity === "error").length;
+    $("mWarn").textContent = open.filter((i) => i.severity === "warn").length;
+    $("mRoad").textContent = Object.values(res.rows).filter((d) => d.leg.stage === "moving" || d.leg.stage === "allocated").length;
+    const cut = (res.cutoffs || []).find((c) => c.hoursLeft > 0 && c.open.length);
+    $("mCut").innerHTML = cut ? `<div class="${cut.atRisk ? "risk" : ""}" title="${esc(cut.vessel + " " + cut.kind + " cutoff")}">⚓ ${esc(cut.vessel.replace(/^(CMA CGM|MSC|MAERSK)\s+/i, ""))} ${esc(NexlMatcher.fmtMin(cut.hoursLeft * 60))}${cut.atRisk ? ` · 🚨${cut.atRisk}` : " ✓"}</div>` : "";
+    const top = open.filter((i) => i.severity === "error").concat(open.filter((i) => i.severity === "warn")).slice(0, 8);
+    $("mList").innerHTML = top.length ? top.map((i, k) => `<button class="mi ${i.severity}" data-k="${k}" title="${esc(i.message)}"><b>${esc(String(i.instruction).split(".")[0])}</b> ${esc(i.short || NexlMatcher.shortIssue(i))}</button>`).join("")
+      : `<div class="mi ok">✓ All clear</div>`;
+    $("mList").querySelectorAll("button.mi").forEach((b) => (b.onclick = () => { const i = top[+b.dataset.k]; if (i.ref) ExcelIO.goTo(i.ref).catch(() => {}); }));
   }
 
   function render() {
     const res = state.result;
     if (!res) return;
+    if (settings.mini) renderMini();
     const open = res.issues.filter((i) => !i.ack && i.severity !== "info");
     const rows = Object.values(res.rows);
     $("tErr").textContent = open.filter((i) => i.severity === "error").length;
@@ -375,7 +493,7 @@
     if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
   }
 
-  const ackTag = (i) => (i.bypass ? "✔ " : "👀 ") + esc(i.ack.by);
+  const ackTag = (i) => (i.bypass ? "✔ " : "👀 ") + esc(i.ack.by) + (/^INSTR\|/.test(i.ack.key || "") ? " (whole instr.)" : "");
   function ackButtons(i) {
     if (i.ack) return i.bypass ? `<button class="ghost xs" data-act="unsnooze" title="${esc(i.ack.text || "")}">↩ Undo bypass</button>`
       : `<button class="ghost xs" data-act="unsnooze">Un-snooze</button>`;
@@ -394,6 +512,7 @@
         ${extra ? `<div class="small">${extra}</div>` : ""}
         <div class="card-actions">
           <button class="ghost xs" data-act="go">Go</button>
+          ${i.field === "seal" && i.severity === "error" && !i.ack ? `<button class="ghost xs" data-act="sealphoto">📷 Seal photo</button>` : ""}
           ${ackButtons(i)}
           <button class="ghost xs" data-act="nexl" data-word="${esc(word)}" data-filter="${filter}">Nexl ↗</button>
           <span class="muted small since">${i.ack ? ackTag(i) : since ? fmtTime(since) : ""}</span>
@@ -410,6 +529,7 @@
       </dl>
       <div class="card-actions">
         <button class="ghost xs" data-act="go">Go to row</button>
+        ${i.field === "seal" && i.severity === "error" && !i.ack ? `<button class="ghost xs" data-act="sealphoto">📷 Seal photo</button>` : ""}
         ${opts.noSnooze && !i.ack ? "" : ackButtons(i)}
         <button class="ghost xs" data-act="nexl" data-word="${esc(word)}" data-filter="${filter}">Nexl ↗</button>
       </div></div>`;
@@ -421,6 +541,7 @@
         const act = e.target.dataset && e.target.dataset.act;
         if (act === "snooze") { e.stopPropagation(); snooze(i); return; }
         if (act === "bypass") { e.stopPropagation(); bypass([i]); return; }
+        if (act === "sealphoto") { e.stopPropagation(); sealIssuePhoto(i); return; }
         if (act === "unsnooze") { e.stopPropagation(); snooze(i, 0); return; }
         if (act === "nexl") { e.stopPropagation(); openNexl(e.target.dataset.word, e.target.dataset.filter, i.instruction); return; }
         if (i.ref) { ExcelIO.goTo(i.ref).catch(() => {}); showDetail(i.ref.tab, i.ref.row); }
@@ -433,11 +554,12 @@
     const list = (state.result.cutoffs || []).filter((c) => c.hoursLeft <= Math.max(settings.cutoffH, 24) && c.hoursLeft > -12);
     box.hidden = !list.length;
     box.innerHTML = list.map((c) => {
-      const cls = c.open.length === 0 ? "ok" : c.hoursLeft < 0 ? "err" : c.hoursLeft <= 3 ? "err" : c.hoursLeft <= settings.cutoffH ? "warn" : "";
+      const cls = c.open.length === 0 ? "ok" : c.hoursLeft < 0 || c.atRisk ? "err" : c.hoursLeft <= 3 ? "err" : c.hoursLeft <= settings.cutoffH ? "warn" : "";
       const when = c.at.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
       const left = c.hoursLeft < 0 ? "missed" : NexlMatcher.fmtMin(c.hoursLeft * 60);
       return `<div class="cut ${cls}"><div><b>⚓ ${esc(c.vessel)}</b> <span class="muted small">${esc(c.terminal)} · ${esc(c.kind)} · ${esc(when)}</span></div>
-        <div class="cutr"><span class="big">${esc(left)}</span><span class="small">${c.total - c.open.length}/${c.total} at port</span></div></div>`;
+        <div class="cutr"><span class="big">${esc(left)}</span><span class="small">${c.total - c.open.length}/${c.total} at port</span>
+        ${c.atRisk ? `<span class="small risk">🚨 ${c.atRisk} likely to miss</span>` : c.open.length && c.hoursLeft > 0 ? `<span class="small okc">✓ on track</span>` : ""}</div></div>`;
     }).join("");
   }
 
@@ -637,24 +759,31 @@
         ${n.moveStatus ? `<dt>Move</dt><dd>${esc(n.moveStatus)}${n.start ? ` · ${esc(n.start)} → ${esc(n.end || "…")}` : ""}</dd>` : ""}
         ${n.podStatus ? `<dt>POD</dt><dd>${podBadge(n.podStatus)}</dd>` : ""}
         ${t && t.lastPing ? `<dt>Last ping</dt><dd>${esc(t.lastPing)} ago</dd>` : ""}
+        ${d.cutoff && d.cutoff.eta ? `<dt>Port ETA</dt><dd class="${d.cutoff.late ? "late" : ""}">~${esc(fmtTime(d.cutoff.eta))} · cutoff ${esc(fmtTime(d.cutoff.at))} ${d.cutoff.late ? "🚨 likely to miss" : "✓"}</dd>` : ""}
+        ${d.slip ? `<dt>Port slip</dt><dd>📄 uploaded <button class="link xs" id="dSlip" type="button">view</button></dd>` : ""}
       </dl>
       ${issues.length ? `<div class="dissues">${issues.map((i) => `<div class="di ${i.ack ? "acked" : i.severity}">${i.ack ? ackTag(i) + ": " : ""}${esc(i.message)}${i.bypass && i.ack.text ? ` <span class="muted">(${esc(i.ack.text)})</span>` : ""}</div>`).join("")}</div>` : ""}
       ${d.fills.length ? `<div class="dfills">${d.fills.map((f, k) => f.needsPhoto
         ? `<div class="dphoto">${photoOf(f).photo ? `<img class="thumb" data-ph="${k}" src="${esc(photoOf(f).photo)}" alt="Container photo" title="Click to enlarge">` : ""}
-           <div>App container: <span class="mono">${esc(f.value)}</span><br>${photoBadge(f)}<br>
-           ${fillAllowed(f) ? `<button class="primary xs" data-fill="${k}" type="button">Apply to ${esc(f.col + f.row)}</button>` : `<span class="muted small">Apply unlocks once the photo matches.</span>`}
+           <div>${f.photoKind === "seal" ? "Nexl seal" : "App container"}: <span class="mono">${esc(f.value)}</span><br>${photoBadge(f)}<br>
+           ${fillAllowed(f) ? `<button class="primary xs" data-fill="${k}" type="button">Apply to ${esc(f.col + f.row)}</button>` : f.photoKind === "seal" && photoOf(f).photo ? `<button class="primary xs" data-ph="${k}" type="button">Check seal photo</button>` : `<span class="muted small">Apply unlocks once the photo matches.</span>`}
            ${photoOf(f).photo ? ` <button class="link xs" data-ph="${k}" type="button">View photo</button>` : ""}</div></div>`
+        : f.slipPath ? `<div class="dphoto"><div>📄 Port slip uploaded → <b>${esc(f.value)}</b><br><button class="primary xs" data-fill="${k}" type="button">Put ${esc(f.value)} in ${esc(f.col + f.row)}</button> <button class="link xs" data-slipd="${k}" type="button">View slip</button></div></div>`
         : `<button class="ghost xs" data-fill="${k}">Fill ${esc(FIELD[f.field] || f.field)} ← ${esc(f.value)}</button>`).join("")}</div>` : ""}
       <div class="row-actions">
         <button class="primary small-btn" id="dNexl" type="button">Open in Nexl ↗</button>
+        ${issues.some((i) => i.field === "seal" && i.severity === "error" && !i.ack) ? `<button class="ghost small-btn" id="dSeal" type="button">📷 Seal photo</button>` : ""}
         ${issues.some((i) => !i.ack) ? `<button class="ghost small-btn" id="dSnooze" type="button">👀 I'm on it</button><button class="ghost small-btn" id="dBypass" type="button">✔ Bypass</button>` : ""}
       </div>`;
     $("dClose").onclick = () => { box.hidden = true; state.selected = null; };
     $("dNexl").onclick = () => openNexl(word, d.container ? "container" : "instruction", d.id);
     if ($("dSnooze")) $("dSnooze").onclick = async () => { for (const i of issues.filter((x) => !x.ack)) await snooze(i); };
+    if ($("dSlip")) $("dSlip").onclick = () => showSlip({ slipPath: d.slip.path, container: d.container, instruction: d.id, value: "", tab, row, col: "" , slipKind: /IMPORT/i.test(tab) ? "collected" : "stacked" });
+    if ($("dSeal")) $("dSeal").onclick = () => sealIssuePhoto(issues.find((i) => i.field === "seal" && i.severity === "error" && !i.ack));
     if ($("dBypass")) $("dBypass").onclick = () => bypass(issues.filter((x) => !x.ack));
     box.querySelectorAll("[data-fill]").forEach((b) => (b.onclick = () => doFill([d.fills[+b.dataset.fill]])));
     box.querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(d.fills[+b.dataset.ph])));
+    box.querySelectorAll("[data-slipd]").forEach((b) => (b.onclick = () => showSlip(d.fills[+b.dataset.slipd])));
     if (!quiet) box.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
@@ -684,7 +813,6 @@
     bind("sStuck", "stuck", "value", (v) => Math.max(15, +v || CFG.stuckMinutes));
     bind("sRegion", "region", "value");
     bind("sCutoffH", "cutoffH", "value", (v) => Math.max(2, Math.min(72, +v || CFG.cutoffWarnHours)));
-    bind("sSilent", "silent", "value", (v) => Math.max(10, Math.min(240, +v || CFG.pingSilentMinutes)));
     $("sTabName").textContent = CFG.checkTabName;
     $("sAutoOpen").checked = ExcelIO.getAutoOpen();
     $("sAutoOpen").addEventListener("change", async () => {
@@ -722,6 +850,12 @@
     $("showDone").addEventListener("change", renderLive);
     $("fillAll").addEventListener("click", () => { (state.result ? state.result.fills : []).forEach((f, k) => fillAllowed(f) && state.fillSel.add(k)); renderFills(); });
     $("fillSel").addEventListener("click", () => doFill([...state.fillSel].map((k) => state.result.fills[k]).filter(Boolean)));
+    $("miniBtn").addEventListener("click", () => { settings.mini = !settings.mini; saveSettings(); applyMini(); });
+    document.querySelectorAll("[data-mgo]").forEach((b) => b.addEventListener("click", () => {
+      settings.mini = false; saveSettings(); applyMini();
+      const t = document.querySelector(`.tile[data-go="${b.dataset.mgo}"]`); if (t) t.click();
+    }));
+    applyMini();
     document.querySelectorAll(".tile").forEach((t) => t.addEventListener("click", () => {
       const g = t.dataset.go;
       if (g === "jobs") { showView("live"); return; }

@@ -57,7 +57,7 @@
         if (loaded.length) await ctx.sync();
         const rows = [];
         for (const { b, rng } of loaded) rng.values.forEach((vals, i) => rows.push({ row: b.start + i + 1, values: vals }));
-        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, cols, rows });
+        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, cols, rows });
       }
       return out;
     });
@@ -269,6 +269,22 @@
     return { filled, skipped };
   }
 
+  /** Replace one cell, but only if it still holds the value the user saw (never clobbers a newer edit). */
+  async function replaceCell(f, expectOld) {
+    let ok = false;
+    await Excel.run(async (ctx) => {
+      const r = ctx.workbook.worksheets.getItem(f.tab).getRange(f.col + f.row);
+      r.load("values");
+      await ctx.sync();
+      const cur = String(r.values[0][0]).trim();
+      if (cur.replace(/\s+/g, "").toUpperCase() !== String(expectOld || "").replace(/\s+/g, "").toUpperCase()) return;
+      r.values = [[f.value]];
+      await ctx.sync();
+      ok = true;
+    });
+    return ok;
+  }
+
   // ---------------------------------------------------------------------------
   // Shared snoozes ("Seen – I'm on it"): a hidden NEXL_ACK sheet so the whole team sees them.
   // ---------------------------------------------------------------------------
@@ -285,7 +301,7 @@
       if (used.isNullObject) return;
       for (const [key, by, until, text, kind, fp] of used.values.slice(1)) {
         const t = Date.parse(until);
-        if (key && t > Date.now()) out[key] = { by, until: t, text, kind: kind || "snooze", fp: fp == null ? "" : String(fp).replace(/^'/, "") };
+        if (key && t > Date.now()) out[key] = { key, by, until: t, text, kind: kind || "snooze", fp: fp == null ? "" : String(fp).replace(/^'/, "") };
       }
     });
     return out;
@@ -390,5 +406,5 @@
 
   LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
 })(window);

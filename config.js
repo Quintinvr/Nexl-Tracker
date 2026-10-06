@@ -59,16 +59,19 @@ window.NEXL_CONFIG = {
     {
       name: "PE CITRUS",
       cutoff: "reefer",
+      slip: "comment", // port slip uploaded -> offer STACKED in COMMENT
       compare: ["seal", "booking", "loadRef", "vessel", "transporter", "driver", "customer"],
     },
     {
       name: "EXPORTS P.E",
       cutoff: "auto", // reefer cutoff when EQUIPMENT says RH/reefer, otherwise dry
+      slip: "seal", // this tab writes STACKED in the SEAL column
       // The SEAL column on this tab holds stack status / appointment times, so seal is not compared.
       compare: ["booking", "vessel", "driver", "customer"],
     },
     {
       name: "IMPORTS P.E",
+      slip: "comment", // port slip on an import = container COLLECTED from the port
       compare: ["vessel", "driver", "customer"],
     },
     {

@@ -37,9 +37,22 @@
       <span class="mini-logo">Ne<b>X</b>L</span><span>Check</span>
     </div>
     <div class="top-actions">
-      <button id="syncBtn" class="primary" type="button">Sync now</button>
+      <button id="miniBtn" class="ghost mini-toggle" type="button" title="Minimal view: just the counts and the urgent alerts, so the panel can be made narrow">▁ Mini</button>
+      <button id="syncBtn" class="primary" type="button"><span class="sync-full">Sync now</span><span class="sync-mini">⟳</span></button>
     </div>
   </header>
+
+  <!-- ===== Minimal view ===== -->
+  <section id="mini" class="mini" hidden>
+    <div class="mini-counts">
+      <button class="mc err" data-mgo="error" title="Errors"><b id="mErr">–</b><span>⛔</span></button>
+      <button class="mc warn" data-mgo="attention" title="Needs attention"><b id="mWarn">–</b><span>⚠️</span></button>
+      <button class="mc road" data-mgo="road" title="On the road"><b id="mRoad">–</b><span>🚚</span></button>
+    </div>
+    <div id="mCut" class="mini-cut"></div>
+    <div id="mList" class="mini-list"></div>
+    <div class="mini-foot"><span id="mSync" class="muted"></span></div>
+  </section>
 
   <div class="statusbar">
     <span class="pill" id="bridgePill"><i></i><span>Bridge</span></span>
@@ -146,7 +159,6 @@
       <label class="check">Alert "not started" after <input type="number" id="sNotStarted" min="5" max="600" step="5"> min</label>
       <label class="check">Alert "stuck at a stop" after <input type="number" id="sStuck" min="15" max="1440" step="15"> min</label>
       <label class="check">Warn before vessel cutoff <input type="number" id="sCutoffH" min="2" max="72" step="1"> h</label>
-      <label class="check">Alert "phone silent" after <input type="number" id="sSilent" min="10" max="240" step="5"> min</label>
       <label class="field">Nexl region
         <select id="sRegion">
           <option value="pe">Port Elizabeth</option>

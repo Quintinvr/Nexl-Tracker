@@ -126,7 +126,7 @@
         const cont = get(r.values, "container");
         const key = compact(cont);
         const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))),
-          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare, cutoffKind: tab.cutoff || null };
+          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare, cutoffKind: tab.cutoff || null, slipField: tab.slip || null };
         rowRecs.push(rec);
         if (!key) { g.openSlots++; stats.openSlots++; continue; }
         stats.rowsChecked++;
@@ -265,7 +265,8 @@
 
     const acks = opts.acks || {};
     const nowMs = now.getTime();
-    const rowStatus = [], fills = [], rows = {};
+    const rowStatus = [], fills = [], rows = {}, slipCandidates = [];
+    const slips = opts.slips || {};
     const sheetKeys = new Set(rowRecs.map((r) => r.key).filter(Boolean));
     const X = extrasContext(rowRecs, nexl, instrById, nexlByContainer, now, opts);
 
@@ -317,11 +318,28 @@
         rowFills.push(f); fills.push(f);
       };
       if (n) {
-        if (r.compare.includes("seal") && !/^\d{1,2}$/.test(n.seal)) addFill("seal", n.seal);
+        if (r.compare.includes("seal") && !/^\d{1,2}$/.test(n.seal) && !/^(NO ?SEAL|0+)$/i.test(n.seal)) {
+          const b4 = rowFills.length;
+          addFill("seal", n.seal);
+          if (rowFills.length > b4) Object.assign(rowFills[rowFills.length - 1], { needsPhoto: true, photoKind: "seal", nexlRowId: n.rowId || "" });
+        }
         if (r.compare.includes("driver")) addFill("driver", (n.driver || "").split(" ")[0]);
         if (r.compare.includes("transporter")) addFill("transporter", (n.owner || "").split(" ")[0]);
       } else if (!r.key && r.tracking) {
         addFill("driver", r.tracking.driver.split(" ")[0]);
+      }
+      // Port slip uploaded in Nexl -> container is at / out of the port.
+      const rk = r.tab + "|" + r.row;
+      if (r.slipField && r.cols[r.slipField] !== undefined && n && n.rowId) {
+        const isImport = /IMPORT/i.test(r.tab) || /import/i.test(((n && instrById.get(n.instruction)) || {}).type || "");
+        const slip = slips[rk];
+        if (slip && blank(r.slipField)) {
+          const b4 = rowFills.length;
+          addFill(r.slipField, isImport ? "COLLECTED" : "STACKED");
+          if (rowFills.length > b4) Object.assign(rowFills[rowFills.length - 1], { slipPath: slip.path, slipKind: isImport ? "collected" : "stacked", source: "portslip" });
+        } else if (!slip && blank(r.slipField) && /moving|delivered|completed|other/.test(ls.stage || "")) {
+          slipCandidates.push({ key: rk, rowId: n.rowId });
+        }
       }
       if (!r.key && blank("container")) {
         const c = slotContainer(r);
@@ -353,7 +371,8 @@
       else if (n || r.tracking) level = "ok";
       rowStatus.push({ tab: r.tab, row: r.row, step: ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
       rows[r.tab + "|" + r.row] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
-        nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor };
+        nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor,
+        slip: slips[rk] || null, cutoff: r.cutoff || null };
     }
     // Snooze state for issues that aren't tied to a row status (e.g. "In Nexl but not on the sheet").
     for (const i of issues) if (!i.key) { i.key = issueKey(i); const ak = ackFor(i, acks, nowMs); if (ak) { i.ack = ak; i.bypass = ak.kind === "bypass"; } }
@@ -362,7 +381,7 @@
     const order = { error: 0, warn: 1, info: 2 };
     issues.sort((a, b) => order[a.severity] - order[b.severity] || String(a.instruction).localeCompare(String(b.instruction)));
     const groupList = [...groups.values()].map((g) => ({ ...g, tabs: [...g.tabs] })).sort((a, b) => b.base.localeCompare(a.base));
-    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows, cutoffs: cutoffSummary(rowRecs, X, rows) };
+    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows, cutoffs: cutoffSummary(rowRecs, X, rows), slipCandidates, legMin: X.legMin, legSamples: legSamples(nexl.tracking || []) };
   }
 
   const FIELD_SHORT = { seal: "Seal", booking: "Booking ref", loadRef: "Load ref", vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
@@ -387,11 +406,20 @@
     return compact(i.sheet) + ">" + compact(i.nexl);
   }
   /** The ack (snooze or bypass) that applies to an issue, if any. */
+  /** Bypass for one kind of alert on a whole instruction (e.g. "vessel differs" on every row of 86888). */
+  function instrKey(i) {
+    return ["INSTR", baseInstr(i.instruction || ""), i.field, i.code || ""].join("|");
+  }
+  /** An instruction-wide bypass holds while the SHEET value stays the same (it says "the sheet is right"). */
+  function instrFp(i) {
+    return i.field === "progress" ? "progress>" + (i.code || "") : compact(i.sheet) + ">*";
+  }
   function ackFor(i, acks, nowMs) {
     const ak = acks[i.key];
-    if (!ak || !(ak.until > nowMs)) return null;
-    if (ak.kind === "bypass" && ak.fp !== issueFp(i)) return null; // values changed -> flag again
-    return ak;
+    if (ak && ak.until > nowMs && (ak.kind !== "bypass" || ak.fp === issueFp(i))) return ak; // values changed -> flag again
+    const ai = i.instruction ? acks[instrKey(i)] : null;
+    if (ai && ai.until > nowMs && ai.kind === "bypass" && ai.fp === instrFp(i)) return ai;
+    return null;
   }
   function issueKey(i) {
     return [i.ref ? i.ref.tab : "", i.ref ? i.ref.row : "", i.field, i.code || "", compact(i.container)].join("|");
@@ -453,7 +481,7 @@
         const jm = durMin(t.jobDuration);
         const step = `Allocated to ${who}${jm != null ? " " + fmtMin(jm) + " ago" : ""} · not started · first stop: ${stops[0] ? stops[0].name : "?"}`;
         if (jm != null && jm >= notStartedMin) alerts.push({ code: "notstarted", text: `Not started: allocated to ${who} ${fmtMin(jm)} ago, no pick-up yet`, short: `⏰ Not started ${fmtMin(jm)}` });
-        return { step, short: `⏳ Allocated · ${first}${jm != null ? " · " + fmtMin(jm) : ""}`, alerts, stage: "allocated", stops: stopList, who };
+        return { step, short: `⏳ Allocated · ${first}${jm != null ? " · " + fmtMin(jm) : ""}`, alerts, stage: "allocated", stops: stopList, who, remaining: Math.max(stops.length - 1, 1), lastAt: null };
       }
       const at = stops[last], when = times[last];
       if (at.role === "POD" || last === stops.length - 1) {
@@ -466,7 +494,8 @@
       const step = `Leg ${last + 1}/${legs}: ${at.name} (${hhmm(when)}) → ${next ? next.name : "?"} · ${who}`;
       if (ageMin >= stuckMin) alerts.push({ code: "stuck", text: `Stuck: at ${at.name} since ${hhmm(when)} (${fmtMin(ageMin)}), not at ${next ? next.name : "next stop"} yet`,
         short: `🛑 Stuck at ${shortName(at.name)} ${fmtMin(ageMin)}` });
-      return { step, short: `🚚 ${last + 1}/${legs} → ${shortName(next ? next.name : "?")} · ${first}`, alerts, stage: "moving", stops: stopList, who };
+      return { step, short: `🚚 ${last + 1}/${legs} → ${shortName(next ? next.name : "?")} · ${first}`, alerts, stage: "moving", stops: stopList, who,
+        remaining: stops.length - 1 - last, lastAt: when, nextName: next ? next.name : "" };
     }
     if (n) {
       if (/complete/i.test(n.moveStatus)) {
@@ -479,7 +508,7 @@
   }
 
   // =====================================================================
-  // Safety checks: vessel cutoffs, genset, silent phone, double allocation
+  // Safety checks: vessel cutoffs, genset, double allocation
   // =====================================================================
   const MON = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, SEPT: 8, OCT: 9, NOV: 10, DEC: 11 };
   /** Excel serial (46302.29) or "26-OCT-03 1800" -> local Date */
@@ -550,6 +579,30 @@
   }
   const dayHm = (d) => `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${hhmm(d)}`;
 
+  /** Typical minutes from one stop to the next, learned from today's driver tracking (median). */
+  /** Stop-to-stop times seen in today's tracking, each with an id so the panel can remember them across syncs. */
+  function legSamples(tracking) {
+    const out = [];
+    for (const t of tracking) {
+      const stops = parseRoute(t.route);
+      let viaN = 0;
+      const times = stops.map((st) => st.role === "POL" ? parseEntry(t.pickup) : st.role === "POD" ? parseEntry(t.dropoff) : parseEntry(viaN++ === 0 ? t.via : viaN === 2 ? t.via2 : ""));
+      for (let i = 1; i < times.length; i++) {
+        if (!times[i] || !times[i - 1]) continue;
+        const m = Math.round((times[i] - times[i - 1]) / 60000);
+        if (m >= 10 && m <= 600) out.push({ id: compact(t.driver) + "|" + +times[i - 1], m, from: stops[i - 1].name, to: stops[i].name, at: +times[i] });
+      }
+    }
+    return out;
+  }
+  function typicalLegMinutes(tracking, fallback, remembered) {
+    const d = (remembered || []).map((x) => x.m);
+    const seen = new Set((remembered || []).map((x) => x.id));
+    for (const x of legSamples(tracking)) if (!seen.has(x.id)) d.push(x.m);
+    if (d.length < 3) return fallback;
+    d.sort((a, b) => a - b);
+    return Math.round(d[Math.floor(d.length / 2)]);
+  }
   function extrasContext(rowRecs, nexl, instrById, nexlByContainer, now, opts) {
     const x = opts.extras || {};
     const ctx = {
@@ -565,6 +618,7 @@
       if (!ctx.activeByDriver.has(k)) ctx.activeByDriver.set(k, []);
       ctx.activeByDriver.get(k).push(t);
     }
+    ctx.legMin = typicalLegMinutes(nexl.tracking || [], opts.legMinutes || 90, opts.legHistory);
     for (const r of rowRecs) if (r.key) { if (!ctx.planByContainer.has(r.key)) ctx.planByContainer.set(r.key, []); ctx.planByContainer.get(r.key).push(r); }
     return ctx;
   }
@@ -582,10 +636,20 @@
       if (cut) {
         const h = (cut - X.now) / 3600e3, kind = reefer ? "reefer" : "dry";
         r.cutoff = { vessel: v.vessel, terminal: v.terminal, kind, at: cut, hoursLeft: h };
+        const eta = finished ? null : predictEta(r, ls, X);
+        r.cutoff.eta = eta;
+        r.cutoff.late = !!(eta && eta > cut);
+        const etaTxt = eta ? `ETA ~${dayHm(eta)}` : "";
         if (finished) { /* already delivered: counted in the summary, no alert */ }
+        else if (h >= 0 && h <= 24 && eta && eta > cut) {
+          const lateBy = fmtMin((eta - cut) / 60000);
+          out.push({ code: "late", severity: "error",
+            text: `Likely to MISS ${v.vessel} ${kind} cutoff (${v.terminal} ${dayHm(cut)}): ${ls.stage === "moving" ? "truck " + ls.remaining + " stop(s) from port" : ls.stage === "allocated" ? "truck not started yet" : "no truck on it yet"}, ${etaTxt} (${lateBy} late)`,
+            short: `🚨 Will miss cutoff: ${etaTxt} vs ${hhmm(cut)}` });
+        }
         else if (h < 0 && h > -24) out.push({ code: "cutoff", severity: "error", text: `Missed ${kind} cutoff for ${v.vessel} (${v.terminal} ${dayHm(cut)}) and not delivered`, short: `⚓ Cutoff missed ${dayHm(cut)}` });
         else if (h >= 0 && h <= X.cutoffWarnH) out.push({ code: "cutoff", severity: h <= X.cutoffRedH ? "error" : "warn",
-          text: `${v.vessel} ${kind} cutoff in ${fmtMin(h * 60)} (${v.terminal} ${dayHm(cut)}), container not at port yet`, short: `⚓ Cutoff in ${fmtMin(h * 60)}` });
+          text: `${v.vessel} ${kind} cutoff in ${fmtMin(h * 60)} (${v.terminal} ${dayHm(cut)}), container not at port yet${eta ? ` · ${etaTxt}, should make it` : ""}`, short: `⚓ Cutoff in ${fmtMin(h * 60)}${eta ? " · ETA " + hhmm(eta) + " ✓" : ""}` });
       }
     }
     // 2. Genset mismatch
@@ -593,12 +657,8 @@
       const tr = findTransporter(X.transporters, rowVal(r, "transporter"), n && n.owner, r.tracking && r.tracking.owner);
       if (tr && tr.genset === "NO") out.push({ code: "genset", severity: "error", text: `Genset required but ${tr.name} has no genset (DATA - TRANSPORTER)`, short: `🔌 Needs genset, ${tr.name} has none` });
     }
-    // 3. Phone gone silent while the truck is between stops
-    if (r.tracking && ls.stage === "moving") {
-      const pm = durMin(r.tracking.lastPing);
-      if (pm != null && pm >= X.silentMin) out.push({ code: "silent", severity: pm >= 90 ? "error" : "warn",
-        text: `No signal from ${ls.who || r.tracking.driver}'s phone for ${fmtMin(pm)} while on the road`, short: `📵 No signal ${fmtMin(pm)}` });
-    }
+    // (No "phone silent" alert: many routes have no signal, so it only cluttered the screen.
+    //  The last ping is still shown in the row details.)
     // 4. Driver on two active jobs at once
     if (r.tracking && (ls.stage === "allocated" || ls.stage === "moving")) {
       const others = (X.activeByDriver.get(compact(r.tracking.driver)) || []).filter((t) => t !== r.tracking);
@@ -618,6 +678,23 @@
     return out;
   }
 
+  /**
+   * When will this load reach the port? Uses the truck's live position and today's typical
+   * stop-to-stop time (X.legMin). Not started: +30 min to get going. No truck yet: +60 min to allocate.
+   */
+  function predictEta(r, ls, X) {
+    const leg = X.legMin * 60000, now = X.now.getTime();
+    if (ls.stage === "moving" && ls.lastAt) {
+      const rem = Math.max(ls.remaining, 1);
+      const stuck = ls.alerts.some((x) => x.code === "stuck") || now - ls.lastAt.getTime() > 2 * leg;
+      if (stuck) return new Date(now + rem * leg); // not moving: every remaining leg still to drive
+      return new Date(Math.max(ls.lastAt.getTime() + rem * leg, now + (rem - 1) * leg + 30 * 60000));
+    }
+    if (ls.stage === "allocated") return new Date(now + 30 * 60000 + Math.max(ls.remaining || 2, 1) * leg);
+    if (!ls.stage || ls.stage === "other") return new Date(now + 60 * 60000 + 2 * leg);
+    return null;
+  }
+
   function cutoffSummary(rowRecs, X, rows) {
     const by = new Map();
     for (const r of rowRecs) {
@@ -628,8 +705,9 @@
       if (!by.has(k)) by.set(k, { ...r.cutoff, total: 0, done: 0, open: [] });
       const g = by.get(k);
       g.total++;
-      if (done) g.done++; else g.open.push({ tab: r.tab, row: r.row, id: r.id, container: r.container });
+      if (done) g.done++; else g.open.push({ tab: r.tab, row: r.row, id: r.id, container: r.container, eta: r.cutoff.eta, late: r.cutoff.late });
     }
+    for (const g of by.values()) g.atRisk = g.open.filter((o) => o.late).length;
     return [...by.values()].filter((g) => g.hoursLeft > -24).sort((a, b) => a.at - b.at);
   }
 
@@ -650,5 +728,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, shortIssue, parseStackDates, parseTransporters, cellDate };
+  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);

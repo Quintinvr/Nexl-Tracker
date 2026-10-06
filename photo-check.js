@@ -94,7 +94,7 @@
   function parseUploads(html) {
     const urls = [...new Set(String(html || "").match(/\/php\/Uploads\/[^"'<> )]+\.(?:jpe?g|png)/gi) || [])];
     const pick = (kind) => urls.find((u) => u.split("/").includes(kind)) || null;
-    return { container: pick("CONTAINER"), seal: pick("SEAL"), damages: pick("DAMAGES"), all: urls };
+    return { container: pick("CONTAINER"), seal: pick("SEAL"), psli: pick("PSLI"), codn: pick("CODN"), damages: pick("DAMAGES"), all: urls };
   }
 
   // ---------- runtime (browser only) ----------
@@ -111,6 +111,33 @@
     return workerP;
   }
   const cache = new Map(); // key -> result (per session)
+
+  // Upload Viewer per Nexl container row. A port slip, once there, stays; otherwise re-check after 4 min.
+  const upCache = new Map();
+  function uploads(rowId) {
+    const hit = upCache.get(rowId);
+    if (hit && (hit.final || Date.now() - hit.at < 4 * 60000)) return hit.p;
+    const p = root.NexlClient.getUploads(rowId).then(parseUploads);
+    const ent = { p, at: Date.now(), final: false };
+    upCache.set(rowId, ent);
+    p.then((u) => { ent.final = !!u.psli; }, () => upCache.delete(rowId));
+    return p;
+  }
+  const imgCache = new Map();
+  function image(path) {
+    if (!imgCache.has(path)) {
+      const p = root.NexlClient.getImage(path);
+      imgCache.set(path, p);
+      p.catch(() => imgCache.delete(path));
+    }
+    return imgCache.get(path);
+  }
+  /** Seal photos can't be read reliably by OCR (small embossed bolts), so they are shown for a quick visual check. */
+  async function sealPhoto(rowId) {
+    const up = await uploads(rowId);
+    if (!up.seal) return { status: "nophoto", detail: "The driver hasn't uploaded a seal photo yet" };
+    return { status: "manual", detail: "Compare the seal photo with the number, then confirm", photo: await image(up.seal), photoPath: up.seal };
+  }
   let queue = Promise.resolve();
 
   /**
@@ -121,11 +148,9 @@
     const key = `${fill.nexlRowId}|${fill.value}`;
     if (cache.has(key)) return cache.get(key);
     const p = (queue = queue.then(async () => {
-      const C = root.NexlClient;
-      const html = await C.getUploads(fill.nexlRowId);
-      const up = parseUploads(html);
+      const up = await uploads(fill.nexlRowId);
       if (!up.container) return { status: "nophoto", detail: "The driver hasn't uploaded a container photo yet" };
-      const img = await C.getImage(up.container);
+      const img = await image(up.container);
       const w = await ocrWorker();
       const r = await w.recognize(img);
       return Object.assign(verifyContainer(r.data.text, fill.value), { photo: img, photoPath: up.container });
@@ -135,5 +160,5 @@
     return p;
   }
 
-  root.NexlPhotoCheck = { iso6346Valid, verifyContainer, parseUploads, check };
+  root.NexlPhotoCheck = { iso6346Valid, verifyContainer, parseUploads, check, uploads, image, sealPhoto };
 })(typeof window !== "undefined" ? window : globalThis);
