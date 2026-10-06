@@ -37,22 +37,11 @@
       <span class="mini-logo">Ne<b>X</b>L</span><span>Check</span>
     </div>
     <div class="top-actions">
-      <button id="miniBtn" class="ghost mini-toggle" type="button" title="Minimal view: just the counts and the urgent alerts, so the panel can be made narrow">▁ Mini</button>
-      <button id="syncBtn" class="primary" type="button"><span class="sync-full">Sync now</span><span class="sync-mini">⟳</span></button>
+      <button id="hideBtn" class="ghost hide-btn" type="button" title="Hide the panel so the sheet gets the full width. Nexl Check keeps syncing; open it again with the Nexl Check button on the Home tab.">Hide ⟩</button>
+      <button id="syncBtn" class="primary" type="button">Sync now</button>
     </div>
   </header>
 
-  <!-- ===== Minimal view ===== -->
-  <section id="mini" class="mini" hidden>
-    <div class="mini-counts">
-      <button class="mc err" data-mgo="error" title="Errors"><b id="mErr">–</b><span>⛔</span></button>
-      <button class="mc warn" data-mgo="attention" title="Needs attention"><b id="mWarn">–</b><span>⚠️</span></button>
-      <button class="mc road" data-mgo="road" title="On the road"><b id="mRoad">–</b><span>🚚</span></button>
-    </div>
-    <div id="mCut" class="mini-cut"></div>
-    <div id="mList" class="mini-list"></div>
-    <div class="mini-foot"><span id="mSync" class="muted"></span></div>
-  </section>
 
   <div class="statusbar">
     <span class="pill" id="bridgePill"><i></i><span>Bridge</span></span>
@@ -149,6 +138,7 @@
       </label>
       <label class="check"><input type="checkbox" id="sAutoOpen"> Open Nexl Check automatically with this workbook</label>
       <label class="check"><input type="checkbox" id="sSplash"> Show the start-up animation</label>
+      <label class="check"><input type="checkbox" id="sPopUp"> When the panel is hidden, pop it back open on a new red error</label>
       <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every <input type="number" id="sMinutes" min="2" max="60" step="1"> min</label>
       <label class="check">Snooze alerts for <input type="number" id="sSnoozeMin" min="10" max="480" step="10"> min</label>
       <label class="check"><input type="checkbox" id="sStatusCols"> Show <b>NEXL STEP</b> / <b>NEXL ALERT</b> columns on the plan tabs</label>

@@ -4,14 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.7.1";
+  const VERSION = "1.8.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, mini: false,
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true,
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
@@ -149,6 +149,7 @@
       hideSplash();
       runPhotoChecks();
       runSlipChecks();
+      popOnNewErrors();
       rememberLegs(res.legSamples);
 
       if (settings.writeTab) {
@@ -448,34 +449,45 @@
     $("fillList").querySelectorAll("[data-apply]").forEach((b) => (b.onclick = () => doFill([fills[+b.dataset.apply]])));
   }
 
-  // ---------- minimal view ----------
-  function applyMini() {
-    document.body.classList.toggle("mini-on", !!settings.mini);
-    $("mini").hidden = !settings.mini;
-    $("miniBtn").textContent = settings.mini ? "⤢ Full" : "▁ Mini";
-    $("miniBtn").title = settings.mini ? "Back to the full panel" : "Minimal view: just the counts and the urgent alerts, so the panel can be made narrow";
-    if (settings.mini) renderMini();
+  // ---------- hide panel (shared runtime keeps syncing while hidden) ----------
+  const canHide = () => !!(window.Office && Office.addin && typeof Office.addin.hide === "function");
+  state.hidden = false;
+  async function hidePanel() {
+    if (!canHide()) {
+      modal("Hide the panel", `<p class="small">To hide the panel and keep Nexl Check syncing, Excel needs the updated add-in file once:</p>
+        <ol class="small"><li>Home > Add-ins > More add-ins > My add-ins > "..." next to Nexl Check > Remove.</li>
+        <li>Upload <b>NexlCheck-Excel.xml</b> from the new team pack again.</li></ol>
+        <p class="small muted">Until then you can close the panel with its ✕ (syncing stops while it is closed).</p>`);
+      return;
+    }
+    try {
+      state.knownErrors = openErrorKeys();
+      await Office.addin.hide();
+      state.hidden = true;
+    } catch (e) { toast("Couldn't hide the panel: " + (e.message || e)); }
   }
-  function renderMini() {
+  function openErrorKeys() {
     const res = state.result;
-    $("mSync").textContent = $("lastSync").textContent.replace("Synced ", "⟳ ");
-    if (!res) return;
-    const open = res.issues.filter((i) => !i.ack && i.severity !== "info");
-    $("mErr").textContent = open.filter((i) => i.severity === "error").length;
-    $("mWarn").textContent = open.filter((i) => i.severity === "warn").length;
-    $("mRoad").textContent = Object.values(res.rows).filter((d) => d.leg.stage === "moving" || d.leg.stage === "allocated").length;
-    const cut = (res.cutoffs || []).find((c) => c.hoursLeft > 0 && c.open.length);
-    $("mCut").innerHTML = cut ? `<div class="${cut.atRisk ? "risk" : ""}" title="${esc(cut.vessel + " " + cut.kind + " cutoff")}">⚓ ${esc(cut.vessel.replace(/^(CMA CGM|MSC|MAERSK)\s+/i, ""))} ${esc(NexlMatcher.fmtMin(cut.hoursLeft * 60))}${cut.atRisk ? ` · 🚨${cut.atRisk}` : " ✓"}</div>` : "";
-    const top = open.filter((i) => i.severity === "error").concat(open.filter((i) => i.severity === "warn")).slice(0, 8);
-    $("mList").innerHTML = top.length ? top.map((i, k) => `<button class="mi ${i.severity}" data-k="${k}" title="${esc(i.message)}"><b>${esc(String(i.instruction).split(".")[0])}</b> ${esc(i.short || NexlMatcher.shortIssue(i))}</button>`).join("")
-      : `<div class="mi ok">✓ All clear</div>`;
-    $("mList").querySelectorAll("button.mi").forEach((b) => (b.onclick = () => { const i = top[+b.dataset.k]; if (i.ref) ExcelIO.goTo(i.ref).catch(() => {}); }));
+    return new Set(res ? res.issues.filter((i) => !i.ack && i.severity === "error").map((i) => i.key) : []);
+  }
+  // While hidden: a NEW red error re-opens the panel (Settings > "Pop up on new errors").
+  async function popOnNewErrors() {
+    if (!state.hidden || !settings.popUp || !canHide() || !state.knownErrors) return;
+    const now = openErrorKeys();
+    const fresh = [...now].filter((k) => !state.knownErrors.has(k));
+    state.knownErrors = now;
+    if (!fresh.length) return;
+    try {
+      await Office.addin.showAsTaskpane();
+      state.hidden = false;
+      const first = state.result.issues.find((i) => i.key === fresh[0]);
+      toast(`🔔 ${fresh.length} new error${fresh.length > 1 ? "s" : ""}${first ? ": " + (first.short || first.message) : ""}`);
+    } catch (e) { /* ignore */ }
   }
 
   function render() {
     const res = state.result;
     if (!res) return;
-    if (settings.mini) renderMini();
     const open = res.issues.filter((i) => !i.ack && i.severity !== "info");
     const rows = Object.values(res.rows);
     $("tErr").textContent = open.filter((i) => i.severity === "error").length;
@@ -802,6 +814,7 @@
     };
     bind("sName", "name", "value", (v) => v.trim());
     bind("sSplash", "splash");
+    bind("sPopUp", "popUp");
     bind("sAuto", "auto");
     bind("sMinutes", "minutes", "value", (v) => Math.max(2, Math.min(60, +v || CFG.refreshMinutes)));
     bind("sSnoozeMin", "snoozeMin", "value", (v) => Math.max(10, Math.min(480, +v || 60)));
@@ -850,12 +863,13 @@
     $("showDone").addEventListener("change", renderLive);
     $("fillAll").addEventListener("click", () => { (state.result ? state.result.fills : []).forEach((f, k) => fillAllowed(f) && state.fillSel.add(k)); renderFills(); });
     $("fillSel").addEventListener("click", () => doFill([...state.fillSel].map((k) => state.result.fills[k]).filter(Boolean)));
-    $("miniBtn").addEventListener("click", () => { settings.mini = !settings.mini; saveSettings(); applyMini(); });
-    document.querySelectorAll("[data-mgo]").forEach((b) => b.addEventListener("click", () => {
-      settings.mini = false; saveSettings(); applyMini();
-      const t = document.querySelector(`.tile[data-go="${b.dataset.mgo}"]`); if (t) t.click();
-    }));
-    applyMini();
+    $("hideBtn").addEventListener("click", hidePanel);
+    if (canHide() && Office.addin.onVisibilityModeChanged) {
+      Office.addin.onVisibilityModeChanged((a) => {
+        state.hidden = a.visibilityMode !== "Taskpane";
+        if (state.hidden) state.knownErrors = openErrorKeys();
+      }).catch(() => {});
+    }
     document.querySelectorAll(".tile").forEach((t) => t.addEventListener("click", () => {
       const g = t.dataset.go;
       if (g === "jobs") { showView("live"); return; }

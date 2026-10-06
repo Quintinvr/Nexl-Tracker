@@ -229,27 +229,5 @@ dd.late { color: #c00000; font-weight: 600; }
 .wide-opt { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0; padding: 6px; border-radius: 6px; background: rgba(32,56,100,.08); }
 .big-seal { font-size: 15px; letter-spacing: .5px; }
 
-/* ===== Minimal view: works down to a very narrow panel ===== */
-.sync-mini, .mini-toggle { display: none; }
-.mini-toggle { display: inline-block; font-size: 12px; padding: 4px 8px; margin-right: 6px; }
-body.mini-on .statusbar, body.mini-on #tiles, body.mini-on .tabs, body.mini-on main, body.mini-on #progress { display: none !important; }
-body.mini-on .top { padding: 6px 8px; gap: 4px; flex-wrap: wrap; }
-body.mini-on .brand span:not(.mini-logo) { display: none; }
-body.mini-on .sync-full { display: none; }
-body.mini-on .sync-mini { display: inline; }
-body.mini-on #syncBtn { padding: 4px 9px; }
-body.mini-on .mini-toggle { margin-right: 4px; padding: 4px 6px; }
-.mini { padding: 6px 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.mini[hidden] { display: none !important; }
-.mini-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 4px; }
-.mc { border: 1px solid var(--line, #ddd); background: var(--bg, #fff); border-radius: 8px; padding: 4px 2px; cursor: pointer; display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
-.mc b { font-size: 20px; }
-.mc span { font-size: 11px; }
-.mc.err b { color: #c00000; } .mc.warn b { color: #b07800; } .mc.road b { color: #1f5fbf; }
-.mini-cut div { font-size: 12px; padding: 4px 6px; border-radius: 6px; background: rgba(32,56,100,.08); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mini-cut .risk { background: #FFC7CE; color: #9C0006; font-weight: 600; }
-.mini-list { display: flex; flex-direction: column; gap: 3px; }
-.mi { text-align: left; font-size: 11.5px; border: 0; border-left: 3px solid #b07800; background: rgba(0,0,0,.04); border-radius: 4px; padding: 4px 6px; cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: inherit; }
-.mi.error { border-left-color: #c00000; } .mi.ok { border-left-color: #1e6b34; cursor: default; }
-.mini-foot { font-size: 11px; text-align: right; }
+/* Hide button */
+.hide-btn { font-size: 12px; padding: 4px 9px; margin-right: 6px; }
