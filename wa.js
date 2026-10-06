@@ -70,28 +70,40 @@
    * opts: { emoji: bool, fields: { container, seal, tare, booking } }
    * One message, split per vessel; each line = LOAD REF then status (+ optional details on the next line).
    */
+  /**
+   * WhatsApp message. *text* shows as bold in WhatsApp.
+   *   Good day,
+   *
+   *   UPDATE
+   *
+   *   *CMA CGM KRIBI*
+   *
+   *   *CR154444* — In transit to COEGA CT (left KHOLD COEGA COLDSTORE 12:48)
+   *      Container: MNBU0333896
+   *      Seal: ML-ZA6734477
+   *
+   *   Kind regards.
+   * With emojis on, the same layout gets 📢 / 🔷 / 🚢 / 🔹 in front.
+   */
   function formatMessage(loads, opts = {}) {
     const e = opts.emoji !== false, f = opts.fields || {};
-    const sep = e ? " | " : " — ";
-    const out = [e ? "📢 Good day," : "Good day,", e ? "🔷 UPDATE" : "UPDATE"];
+    const sep = " — ";
+    const bold = (t) => `*${String(t).replace(/\*/g, "")}*`;
+    const out = [e ? "📢 Good day," : "Good day,", "", e ? "🔷 UPDATE" : "UPDATE"];
     const vessels = new Map();
     for (const l of loads) { const v = l.vessel || "VESSEL TBC"; if (!vessels.has(v)) vessels.set(v, []); vessels.get(v).push(l); }
     for (const [vessel, list] of vessels) {
-      out.push("", e ? `🚢 ${vessel}` : vessel);
-      const anyDetail = !!(f.container || f.seal || f.tare || f.booking);
-      list.forEach((l, k) => {
-        // With details ticked, a blank line between loads keeps each load's block easy to read.
-        if (k > 0 && anyDetail) out.push("");
-        out.push(`${e ? "🔹 " : ""}${l.loadRef}${sep}${l.status}`);
-        // One detail per line, all indented the same.
+      out.push("", `${e ? "🚢 " : ""}${bold(vessel)}`);
+      for (const l of list) {
+        out.push("", `${e ? "🔹 " : ""}${bold(l.loadRef)}${sep}${l.status}`);
         const extra = [
           f.container && l.container && `Container: ${l.container}`,
           f.seal && l.seal && `Seal: ${l.seal}`,
           f.tare && l.tare && `Tare: ${l.tare}`,
           f.booking && l.booking && `Booking: ${l.booking}`,
         ].filter(Boolean);
-        for (const x of extra) out.push(`${e ? "      " : "   "}${x}`);
-      });
+        for (const x of extra) out.push(`   ${x}`);
+      }
     }
     out.push("", "Kind regards.");
     return out.join("\n");
