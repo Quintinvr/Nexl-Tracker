@@ -78,18 +78,22 @@
     for (const l of loads) { const v = l.vessel || "VESSEL TBC"; if (!vessels.has(v)) vessels.set(v, []); vessels.get(v).push(l); }
     for (const [vessel, list] of vessels) {
       out.push("", e ? `🚢 ${vessel}` : vessel);
-      for (const l of list) {
+      const anyDetail = !!(f.container || f.seal || f.tare || f.booking);
+      list.forEach((l, k) => {
+        // With details ticked, a blank line between loads keeps each load's block easy to read.
+        if (k > 0 && anyDetail) out.push("");
         out.push(`${e ? "🔹 " : ""}${l.loadRef}${sep}${l.status}`);
+        // One detail per line, all indented the same.
         const extra = [
           f.container && l.container && `Container: ${l.container}`,
           f.seal && l.seal && `Seal: ${l.seal}`,
           f.tare && l.tare && `Tare: ${l.tare}`,
           f.booking && l.booking && `Booking: ${l.booking}`,
         ].filter(Boolean);
-        if (extra.length) out.push(`${e ? "      " : "   "}${extra.join(e ? " · " : ", ")}`);
-      }
+        for (const x of extra) out.push(`${e ? "      " : "   "}${x}`);
+      });
     }
-    out.push("Kind regards.");
+    out.push("", "Kind regards.");
     return out.join("\n");
   }
 
