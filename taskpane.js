@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.6.0";
+  const VERSION = "1.6.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -265,7 +265,10 @@
     const ins = /^\d{3,8}(\.\d{1,2})?$/.test(String(instruction || "")) ? String(instruction) : null;
     toast(ins ? `Opening ${ins} in Nexl…` : `Searching Nexl for ${w}…`);
     const r = await NexlClient.openInNexl(filter, w, ins, ins ? screenFor(ins) : null);
-    if (r.ok) return;
+    if (r.ok) {
+      if (ins && r.how === "search") toast(`${ins} isn't on Active, Completed or Finance — showing Nexl's search instead.`);
+      return;
+    }
     if (r.error === "NOT_LOGGED_IN") { toast("Log in to Nexl first, then try again."); return; }
     // Older bridge (1.0) or blocked: copy + open Nexl so the user can paste into Nexl's search.
     try { await navigator.clipboard.writeText(w); } catch (e) { /* ignore */ }
