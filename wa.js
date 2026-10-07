@@ -67,19 +67,14 @@
       const d = rows ? rows[`${tabName}|${i + 1}`] : null;
       const live = liveStatus(d);
       const comment = get(r, "comment");
-      const sheet = comment || get(r, "navis");
-      // Live progress wins while a truck is on it; once complete, the sheet's own wording (e.g. STACKED) wins.
-      // The controller's COMMENT is always passed on, exactly as typed: under the live status while a truck
-      // is on the load, otherwise it is the status itself (so it's never shown twice).
-      let status, icon, remark = "";
-      if (live && !live.completed) { status = live.text; icon = live.icon; if (comment && comment.toUpperCase() !== status.toUpperCase()) remark = comment; }
-      else if (sheet) { status = sheet; icon = live ? live.icon : "🔹"; }
-      else if (live) { status = live.text; icon = live.icon; }
-      else { status = "Awaiting update"; icon = "⏳"; }
+      // The client update uses ONLY what the controller typed in the COMMENT column.
+      // Nexl's live status is not put in the message (it is shown in the panel as a hint only: nexlHint).
+      const status = comment || "Awaiting update", icon = comment ? "🔹" : "⏳", remark = "";
+      const nexlHint = live ? live.text : "";
       loads.push({
         id: `${tabName}|${i + 1}`, row: i + 1, client, clientKey: compact(client),
         vessel: get(r, "vessel"), loadRef: loadRef || container, container, seal: get(r, "seal"),
-        tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed), remark,
+        tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed), remark, nexlHint, hasComment: !!comment,
         date: cols.loadDate === undefined ? "" : dateKey(r[cols.loadDate]),
       });
     });

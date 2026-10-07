@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.9.3">
+  <link rel="stylesheet" href="taskpane.css?v=1.9.4">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -132,7 +132,7 @@
         <label><input type="checkbox" data-f="booking"> Booking ref</label>
         <label class="wa-emoji"><input type="checkbox" id="waEmoji"> Emojis 😀</label>
       </div>
-      <p class="muted small">Loads on <b id="waTab">PE CITRUS</b> for the chosen load date and client, split per vessel. Tick the loads to include, or use <b>Copy</b> on a single load. Live Nexl status while a truck is on the load; otherwise the sheet's COMMENT.</p>
+      <p class="muted small">Loads on <b id="waTab">PE CITRUS</b> for the chosen load date and client, split per vessel. Tick the loads to include, or use <b>Copy</b> on a single load. The status is the controller's <b>COMMENT</b> on the sheet only (Nexl's status is shown in grey for reference, but not sent).</p>
       <div id="waList" class="list"></div>
     </section>
 
@@ -179,14 +179,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=1.9.3"></script>
-  <script src="nexl-parsers.js?v=1.9.3"></script>
-  <script src="matcher.js?v=1.9.3"></script>
-  <script src="nexl-client.js?v=1.9.3"></script>
-  <script src="wa.js?v=1.9.3"></script>
-  <script src="excel-io.js?v=1.9.3"></script>
+  <script src="config.js?v=1.9.4"></script>
+  <script src="nexl-parsers.js?v=1.9.4"></script>
+  <script src="matcher.js?v=1.9.4"></script>
+  <script src="nexl-client.js?v=1.9.4"></script>
+  <script src="wa.js?v=1.9.4"></script>
+  <script src="excel-io.js?v=1.9.4"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=1.9.3"></script>
-  <script src="taskpane.js?v=1.9.3"></script>
+  <script src="photo-check.js?v=1.9.4"></script>
+  <script src="taskpane.js?v=1.9.4"></script>
 </body>
 </html>

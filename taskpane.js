@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.3";
+  const VERSION = "1.9.4";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -772,7 +772,7 @@
           <div class="wa-load${l.live ? " live" : ""}">
             <input type="checkbox" data-id="${esc(l.id)}" ${state.waUnticked.has(l.id) ? "" : "checked"} aria-label="Include ${esc(l.loadRef)}">
             <span class="wa-ref mono">${esc(l.loadRef)}</span>
-            <span class="wa-st">${esc(l.status)}${l.remark ? `<br><span class="wa-rem">💬 ${esc(l.remark)}</span>` : ""}</span>
+            <span class="wa-st">${l.hasComment ? esc(l.status) : `<span class="wa-none">no comment yet</span>`}${l.nexlHint ? `<br><span class="wa-rem" title="Nexl status (not included in the update)">Nexl: ${esc(l.nexlHint)}</span>` : ""}</span>
             <button class="ghost xs wa-one" data-id="${esc(l.id)}" type="button" title="Copy an update for just this load">Copy</button>
           </div>`).join("")).join("")}
         <textarea class="full wa-msg" rows="${Math.min(12, msg.split("\n").length + 1)}" placeholder="Tick at least one load">${esc(msg)}</textarea>
