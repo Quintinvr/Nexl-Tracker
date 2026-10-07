@@ -69,9 +69,10 @@
       const comment = get(r, "comment");
       const sheet = comment || get(r, "navis");
       // Live progress wins while a truck is on it; once complete, the sheet's own wording (e.g. STACKED) wins.
-      // The controller's COMMENT is still passed on underneath the live status (unless it's just a status word).
+      // The controller's COMMENT is always passed on, exactly as typed: under the live status while a truck
+      // is on the load, otherwise it is the status itself (so it's never shown twice).
       let status, icon, remark = "";
-      if (live && !live.completed) { status = live.text; icon = live.icon; if (comment && !isStatusWord(comment)) remark = comment; }
+      if (live && !live.completed) { status = live.text; icon = live.icon; if (comment && comment.toUpperCase() !== status.toUpperCase()) remark = comment; }
       else if (sheet) { status = sheet; icon = live ? live.icon : "🔹"; }
       else if (live) { status = live.text; icon = live.icon; }
       else { status = "Awaiting update"; icon = "⏳"; }

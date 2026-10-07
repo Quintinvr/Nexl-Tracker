@@ -126,7 +126,9 @@
         const cont = get(r.values, "container");
         const key = compact(cont);
         const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))),
-          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare, cutoffKind: tab.cutoff || null, slipField: tab.slip || null };
+          ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare, cutoffKind: tab.cutoff || null, slipField: tab.slip || null,
+          // Planned collection: container pre-filled, no driver on the sheet yet -> no alerts until a driver is added.
+          planned: !!(tab.planned && key && col.driver !== undefined && clean(r.values[col.driver]) === "") };
         rowRecs.push(rec);
         if (!key) { g.openSlots++; stats.openSlots++; continue; }
         stats.rowsChecked++;
@@ -265,7 +267,7 @@
 
     const acks = opts.acks || {};
     const nowMs = now.getTime();
-    const rowStatus = [], fills = [], rows = {}, slipCandidates = [];
+    const rowStatus = [], fills = [], rows = {}, slipCandidates = [], muted = new Set();
     const slips = opts.slips || {};
     const sheetKeys = new Set(rowRecs.map((r) => r.key).filter(Boolean));
     const X = extrasContext(rowRecs, nexl, instrById, nexlByContainer, now, opts);
@@ -351,6 +353,17 @@
         }
       }
 
+      if (r.planned) {
+        // Not flagged: everything about this row stays quiet until the controller puts a driver's name on it.
+        for (const i of (r.entry ? r.entry.issues : []).concat(progressIssues)) muted.add(i);
+        if (r.entry) r.entry.issues = [];
+        const live = ls.stage === "moving" || ls.stage === "allocated";
+        rowStatus.push({ tab: r.tab, row: r.row, step: live ? ls.short : "📋 Planned · no driver yet", alert: "", level: "" });
+        rows[rk] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
+          nexl: n, tracking: r.tracking, leg: ls, issues: [], fills: rowFills, ref: anchor, slip: slips[rk] || null, cutoff: r.cutoff || null, planned: true };
+        stats.planned = (stats.planned || 0) + 1;
+        continue;
+      }
       const rowIssues = (r.entry ? r.entry.issues : []).filter((i) => i.severity !== "info" && i.field !== "progress").concat(progressIssues);
       let open = 0;
       const parts = rowIssues.map((i) => {
@@ -373,6 +386,11 @@
       rows[r.tab + "|" + r.row] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
         nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor,
         slip: slips[rk] || null, cutoff: r.cutoff || null };
+    }
+    if (muted.size) {
+      const keep = issues.filter((i) => !muted.has(i));
+      issues.length = 0; issues.push(...keep);
+      for (const g of groups.values()) for (const c of g.containers) if (c.issues) c.issues = c.issues.filter((i) => !muted.has(i));
     }
     // Snooze state for issues that aren't tied to a row status (e.g. "In Nexl but not on the sheet").
     for (const i of issues) if (!i.key) { i.key = issueKey(i); const ak = ackFor(i, acks, nowMs); if (ak) { i.ack = ak; i.bypass = ak.kind === "bypass"; } }

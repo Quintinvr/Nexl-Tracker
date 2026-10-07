@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.8.7";
+  const VERSION = "1.8.9";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -150,6 +150,7 @@
       runPhotoChecks();
       runSlipChecks();
       popOnNewErrors();
+      checkForUpdate();
       rememberLegs(res.legSamples);
 
       if (settings.writeTab) {
@@ -447,6 +448,22 @@
     $("fillList").querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(fills[+b.dataset.ph])));
     $("fillList").querySelectorAll("[data-slip]").forEach((b) => (b.onclick = () => showSlip(fills[+b.dataset.slip])));
     $("fillList").querySelectorAll("[data-apply]").forEach((b) => (b.onclick = () => doFill([fills[+b.dataset.apply]])));
+  }
+
+  // ---------- self-update: open panels switch to a new version as soon as GitHub has it ----------
+  async function checkForUpdate() {
+    try {
+      const r = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+      if (!r.ok) return;
+      const v = (await r.json()).version;
+      if (!v || v === VERSION) return;
+      const u = new URL(location.href);
+      if (u.searchParams.get("v") === v) return; // already tried this version: don't loop
+      banner(`🔄 Nexl Check <b>v${esc(v)}</b> is available — updating in a moment… <button id="updNow" class="primary xs" type="button">Update now</button>`, "info");
+      const go = () => { u.searchParams.set("v", v); location.replace(u.toString()); };
+      $("updNow").onclick = go;
+      setTimeout(() => { if (!state.busy) go(); }, 8000);
+    } catch (e) { /* offline: try next sync */ }
   }
 
   // ---------- team-aligned sync schedule ----------
@@ -937,6 +954,7 @@
     $("versions").textContent = `Add-in v${VERSION}` + (p.ok ? ` · Bridge v${p.version}` : "");
     ExcelIO.watchSelection(CFG.tabs.map((t) => t.name), (tab, row) => showDetail(tab, row, true)).catch(() => {});
     sync();
+    checkForUpdate();
 
     // Team-aligned auto-refresh: everyone syncs on the same clock slots (e.g. 10:00, 10:05, 10:10 ...),
     // so all panels and the sheet show the same picture at the same time. Keeps running while the panel is hidden.

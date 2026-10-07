@@ -49,7 +49,7 @@ window.NEXL_CONFIG = {
     genset:      [/^GENSET REQUIRED$/i],
     equipment:   [/^EQUIPMENT$/i, /^ISO$/i],
     navis:       [/^NAVIS CHECK$/i],
-    comment:     [/^COMMENT$/i],
+    comment:     [/^COMMENTS?$/i, /^REMARKS?$/i, /^CONTROLLER COMMENTS?$/i],
     tare:        [/^TARE$/i],
     loadDate:    [/LOAD DATE$/i, /^LOADING DATE$/i, /^DATE$/i],
   },
@@ -67,12 +67,14 @@ window.NEXL_CONFIG = {
       name: "EXPORTS P.E",
       cutoff: "auto", // reefer cutoff when EQUIPMENT says RH/reefer, otherwise dry
       slip: "seal", // this tab writes STACKED in the SEAL column
+      planned: true, // container filled in but no DRIVER yet = planned collection: no alerts until a driver is added
       // The SEAL column on this tab holds stack status / appointment times, so seal is not compared.
       compare: ["booking", "vessel", "driver", "customer"],
     },
     {
       name: "IMPORTS P.E",
       slip: "comment", // port slip on an import = container COLLECTED from the port
+      planned: true, // container filled in but no DRIVER yet = planned collection: no alerts until a driver is added
       compare: ["vessel", "driver", "customer"],
     },
     {
