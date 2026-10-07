@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.1";
+  const VERSION = "1.9.2";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -592,15 +592,16 @@
 
   function renderCutoffs() {
     const box = $("cutoffBox");
-    const list = (state.result.cutoffs || []).filter((c) => c.hoursLeft <= Math.max(settings.cutoffH, 24) && c.hoursLeft > -12);
+    // Past cutoffs: keep the card 12 h if something missed it, but only 2 h when everything made it.
+    const list = (state.result.cutoffs || []).filter((c) => c.hoursLeft <= Math.max(settings.cutoffH, 24) && c.hoursLeft > (c.open.length ? -12 : -2));
     box.hidden = !list.length;
     box.innerHTML = list.map((c) => {
       const cls = c.open.length === 0 ? "ok" : c.hoursLeft < 0 || c.atRisk ? "err" : c.hoursLeft <= 3 ? "err" : c.hoursLeft <= settings.cutoffH ? "warn" : "";
       const when = c.at.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
-      const left = c.hoursLeft < 0 ? "missed" : NexlMatcher.fmtMin(c.hoursLeft * 60);
+      const lab = NexlMatcher.cutoffLabel(c), past = lab.past, n = c.open.length, left = lab.big;
       return `<div class="cut ${cls}"><div><b>⚓ ${esc(c.vessel)}</b> <span class="muted small">${esc(c.terminal)} · ${esc(c.kind)} · ${esc(when)}</span></div>
         <div class="cutr"><span class="big">${esc(left)}</span><span class="small">${c.total - c.open.length}/${c.total} at port</span>
-        ${c.atRisk ? `<span class="small risk">🚨 ${c.atRisk} likely to miss</span>` : c.open.length && c.hoursLeft > 0 ? `<span class="small okc">✓ on track</span>` : ""}</div></div>`;
+        ${!n ? `<span class="small okc">all made it${past ? "" : ` · closes in ${esc(NexlMatcher.fmtMin(c.hoursLeft * 60))}`}</span>` : c.atRisk && !past ? `<span class="small risk">🚨 ${c.atRisk} likely to miss</span>` : !past ? `<span class="small okc">✓ on track</span>` : ""}</div></div>`;
     }).join("");
   }
 

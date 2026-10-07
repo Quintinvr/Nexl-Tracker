@@ -746,6 +746,12 @@
     return null;
   }
 
+  /** Wording on a vessel cutoff card. Only "missed" when containers really are not at port. */
+  function cutoffLabel(c) {
+    const past = c.hoursLeft < 0, n = c.open.length;
+    return { big: past ? (n ? `${n} missed` : "✓ Closed") : n ? fmtMin(c.hoursLeft * 60) : "✓ All in", allIn: !n, past };
+  }
+
   function cutoffSummary(rowRecs, X, rows) {
     const by = new Map();
     for (const r of rowRecs) {
@@ -779,5 +785,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, shortIssue, parseStackDates, parseTransporters, cellDate };
+  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);
