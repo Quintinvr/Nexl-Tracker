@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.9.9">
+  <link rel="stylesheet" href="taskpane.css?v=2.0.0">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -140,6 +140,12 @@
       <p class="muted small" id="waHelp">Loads on <b id="waTab">PE CITRUS</b> for the chosen load date and client, split per vessel. Tick the loads to include, or use <b>Copy</b> on a single load. The status is the controller's <b>COMMENT</b> on the sheet only (Nexl's status is shown in grey for reference, but not sent).</p>
       <div id="waList" class="list"></div>
       <div id="waDriver" hidden>
+        <p class="muted small" id="waDrvHint">Click a load below, or click its row on the sheet, to see the driver message here.</p>
+        <div id="waDrvBox" class="wa" hidden>
+          <div class="wa-head"><b id="waDrvTitle"></b><span class="muted small" id="waDrvSrc"></span></div>
+          <textarea id="waDrvMsg" class="full wa-msg" rows="7"></textarea>
+          <div class="row-actions"><button id="waDrvCopy" class="primary small-btn" type="button">Copy driver message</button></div>
+        </div>
         <div class="wa-pick">
           <label class="wa-date">📄 Sheet <select id="waDrvSheet"></select></label>
         </div>
@@ -150,11 +156,6 @@
         </div>
         <input id="waDrvSearch" type="search" class="full" placeholder="Search load ref, driver, instruction…">
         <div id="waDrvList" class="drvlist"></div>
-        <div id="waDrvBox" class="wa" hidden>
-          <div class="wa-head"><b id="waDrvTitle"></b><span class="muted small" id="waDrvSrc"></span></div>
-          <textarea id="waDrvMsg" class="full wa-msg" rows="7"></textarea>
-          <div class="row-actions"><button id="waDrvCopy" class="primary small-btn" type="button">Copy driver message</button></div>
-        </div>
       </div>
     </section>
 
@@ -201,14 +202,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=1.9.9"></script>
-  <script src="nexl-parsers.js?v=1.9.9"></script>
-  <script src="matcher.js?v=1.9.9"></script>
-  <script src="nexl-client.js?v=1.9.9"></script>
-  <script src="wa.js?v=1.9.9"></script>
-  <script src="excel-io.js?v=1.9.9"></script>
+  <script src="config.js?v=2.0.0"></script>
+  <script src="nexl-parsers.js?v=2.0.0"></script>
+  <script src="matcher.js?v=2.0.0"></script>
+  <script src="nexl-client.js?v=2.0.0"></script>
+  <script src="wa.js?v=2.0.0"></script>
+  <script src="excel-io.js?v=2.0.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=1.9.9"></script>
-  <script src="taskpane.js?v=1.9.9"></script>
+  <script src="photo-check.js?v=2.0.0"></script>
+  <script src="taskpane.js?v=2.0.0"></script>
 </body>
 </html>

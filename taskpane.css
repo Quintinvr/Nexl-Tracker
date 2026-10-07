@@ -266,3 +266,6 @@ button.go-cell.mono { font-weight: 500; }
 .drv:hover { border-color: var(--accent); }
 .drv.sel { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
 .drv-route { display: block; color: var(--muted); margin-top: 2px; }
+#waDrvBox { margin-bottom: 10px; scroll-margin-top: 8px; }
+#waDrvBox.flash { animation: drvflash 1.2s ease-out; }
+@keyframes drvflash { 0% { box-shadow: 0 0 0 3px #25d366; } 100% { box-shadow: 0 0 0 0 transparent; } }

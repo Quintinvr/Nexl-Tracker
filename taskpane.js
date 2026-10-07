@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.9";
+  const VERSION = "2.0.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -804,15 +804,37 @@
         <b class="mono">${esc(l.loadRef)}</b> <span class="muted small">${esc(l.instruction || "")}</span> · <b>${esc(l.driver || "no driver")}</b>${l.portBooking ? ` <span class="small">· 🎫 ${esc(l.portBooking)}</span>` : ""}
         <span class="small drv-route">${esc(short(l.route.collect))} → ${esc((l.route.packing || []).map(short).join(" → ") || "?")} → ${esc(short(l.route.dropoff))}</span></button>`).join("")
       : `<p class="empty">No loads for this date.</p>`;
-    $("waDrvList").querySelectorAll(".drv").forEach((b) => (b.onclick = () => { state.waDrvSel = b.dataset.id; renderDriver(); }));
+    $("waDrvList").querySelectorAll(".drv").forEach((b) => (b.onclick = () => { state.waDrvSel = b.dataset.id; renderDriver(); showDrvBox(); }));
     const sel = src.loads.find((l) => l.id === state.waDrvSel);
-    $("waDrvBox").hidden = !sel;
+    $("waDrvBox").hidden = !sel; $("waDrvHint").hidden = !!sel;
     if (sel) {
       $("waDrvTitle").textContent = `${sel.loadRef} · ${sel.driver || "no driver on the sheet"}`;
       $("waDrvSrc").textContent = sel.route.source === "nexl" ? `route from Nexl ${sel.instruction}` : "route from the sheet (not found in Nexl)";
       const key = [sel.id, settings.waEmoji, fl.container, fl.booking].join("|");
       if (state.waDrvMsgFor !== key) { $("waDrvMsg").value = NexlWhatsApp.driverMessage(sel, { emoji: settings.waEmoji, fields: fl }); state.waDrvMsgFor = key; }
     }
+  }
+  // Bring the driver message (at the top of the tab) into view and flash it.
+  function showDrvBox() {
+    const b = $("waDrvBox");
+    if (b.hidden) return;
+    b.scrollIntoView({ block: "start", behavior: "smooth" });
+    b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash");
+  }
+  // A row clicked on the sheet while WhatsApp > Driver is open: show that load's driver message.
+  function driverFromSheet(tab, row) {
+    if (state.view !== "wa" || state.waMode !== "driver") return false;
+    const sheet = (CFG.driverSheets || []).find((x) => x.name === tab);
+    if (!sheet) return false;
+    if (settings.waDrvSheet !== tab) { settings.waDrvSheet = tab; saveSettings(); }
+    const id = `${tab}|${row}`;
+    const src = driverSource();
+    if (!src.loads.some((l) => l.id === id)) { toast(`Row ${row} on ${tab} isn't a load with a Nexl instruction yet.`); return true; }
+    state.waDrvSel = id;
+    $("waDrvSearch").value = "";
+    if (src.dated) { const l = src.loads.find((x) => x.id === id); if (l && state.waDate !== "*") state.waDate = l.date; } // show that load's date in the list
+    renderWhatsApp(); showDrvBox();
+    return true;
   }
   function setWaMode(m) {
     state.waMode = m;
@@ -1053,7 +1075,7 @@
     const p = await NexlClient.ping();
     pill("bridgePill", p.ok, p.ok ? "Bridge" : "Bridge missing");
     $("versions").textContent = `Add-in v${VERSION}` + (p.ok ? ` · Bridge v${p.version}` : "");
-    ExcelIO.watchSelection(CFG.tabs.map((t) => t.name), (tab, row) => showDetail(tab, row, true)).catch(() => {});
+    ExcelIO.watchSelection([...new Set([...CFG.tabs.map((t) => t.name), ...(CFG.driverSheets || []).map((t) => t.name)])], (tab, row) => { if (!driverFromSheet(tab, row)) showDetail(tab, row, true); }).catch(() => {});
     sync();
     checkForUpdate();
 
