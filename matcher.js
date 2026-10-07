@@ -495,6 +495,18 @@
       const legs = Math.max(stops.length - 1, 1);
       const who = t.driver.split(" ").slice(0, 2).join(" ");
       const first = t.driver.split(" ")[0];
+      // No stop times from the app, but the driver HAS captured the container (Driver Tracking shows the real
+      // number instead of PENDING1) or Nexl already has his seal -> he has loaded: not "not started".
+      const capturedBox = /^[A-Z]{4}\d{7}$/.test(compact(t.container));
+      const capturedSeal = !!(n && n.seal && !/^\d{1,2}$/.test(n.seal) && !/^(NO ?SEAL|0+)$/i.test(n.seal));
+      if (last < 0 && (capturedBox || capturedSeal) && stops.length) {
+        stopList[0] = { ...stopList[0], done: true, time: null };
+        const next = stops[1];
+        const what = [capturedBox && "container", capturedSeal && "seal"].filter(Boolean).join(" & ");
+        return { step: `Loaded at ${stops[0].name} (${what} captured in the app, no stop times sent) → ${next ? next.name : "?"} · ${who}`,
+          short: `🚚 Loaded → ${shortName(next ? next.name : "?")} · ${first}`, alerts, stage: "moving", stops: stopList, who,
+          remaining: Math.max(stops.length - 1, 1), lastAt: null, nextName: next ? next.name : "", noTimes: true };
+      }
       if (last < 0) {
         const jm = durMin(t.jobDuration);
         const step = `Allocated to ${who}${jm != null ? " " + fmtMin(jm) + " ago" : ""} · not started · first stop: ${stops[0] ? stops[0].name : "?"}`;
@@ -702,6 +714,7 @@
    */
   function predictEta(r, ls, X) {
     const leg = X.legMin * 60000, now = X.now.getTime();
+    if (ls.stage === "moving" && !ls.lastAt) return new Date(now + Math.max(ls.remaining || 1, 1) * leg); // loaded, no stop times
     if (ls.stage === "moving" && ls.lastAt) {
       const rem = Math.max(ls.remaining, 1);
       const stuck = ls.alerts.some((x) => x.code === "stuck") || now - ls.lastAt.getTime() > 2 * leg;
