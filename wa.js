@@ -76,12 +76,25 @@
         vessel: get(r, "vessel"), loadRef: loadRef || container, container, seal: get(r, "seal"),
         tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed), remark, nexlHint, hasComment: !!comment,
         date: cols.loadDate === undefined ? "" : dateKey(r[cols.loadDate]),
-        instruction: get(r, "instruction"), driver: get(r, "driver"), transporter: get(r, "transporter"),
+        instruction: get(r, "instruction"), driver: get(r, "driver"), transporter: get(r, "transporter"), portBooking: portBooking(r),
         // Route for the driver message: Nexl's instruction route first, the sheet's depot/packstore/port as fallback.
         route: routeFor(d, { collect: get(r, "emptyDepot"), packing: get(r, "packstore"), dropoff: get(r, "port") }),
       });
     });
     return loads;
+  }
+
+  /**
+   * Port booking (terminal slot) as controllers type it, e.g. "29734729 - 16:00". It sits in different columns
+   * per sheet (EXPORTS: SEAL, IMPORTS: NAVIS CHECK, sometimes COMMENT), so look for the pattern on the whole row.
+   */
+  const PORT_BOOKING = /\b(\d{6,10})\s*[-–]\s*(\d{1,2})[:h.](\d{2})\b/;
+  function portBooking(values) {
+    for (const v of values || []) {
+      const m = PORT_BOOKING.exec(String(v == null ? "" : v));
+      if (m) return `${m[1]} - ${m[2].padStart(2, "0")}:${m[3]}`;
+    }
+    return "";
   }
 
   function routeFor(d, sheet) {
@@ -105,7 +118,7 @@
     const line = (icon, label, v) => `${e ? icon + " " : ""}${label} - ${v || ""}`;
     const out = [e ? "📱 Job on app" : "Job on app", ""];
     // Optional on the Collect line: container and booking (imports / full exports).
-    const extra = [f.container && l.container && `Container: ${l.container}`, f.booking && l.booking && `Booking: ${l.booking}`].filter(Boolean);
+    const extra = [f.container && l.container && `Container: ${l.container}`, f.booking && l.portBooking && `Port booking: ${l.portBooking}`].filter(Boolean);
     out.push(line("📦", "Collect", r.collect) + (extra.length ? ` (${extra.join(" · ")})` : ""));
     const packs = (r.packing || []).filter(Boolean); // no packing stop (e.g. imports: port -> depot) = no Packing line
     packs.forEach((p, i) => out.push(line("🏭", packs.length > 1 ? `Packing ${i + 1}` : "Packing", p)));
@@ -123,7 +136,7 @@
       const d = rowsMap ? rowsMap[`${tab}|${row}`] : null;
       out.push({
         id: `${tab}|${row}`, row, tab, client: get(values, "customer"), loadRef: get(values, "loadRef") || container || instruction, container,
-        booking: get(values, "booking"), instruction, driver: get(values, "driver"), date: cols.loadDate === undefined ? "" : dateKey(values[cols.loadDate]),
+        booking: get(values, "booking"), portBooking: portBooking(values), instruction, driver: get(values, "driver"), date: cols.loadDate === undefined ? "" : dateKey(values[cols.loadDate]),
         route: routeFor(d, { collect: get(values, fallback.collect), packing: get(values, fallback.packing), dropoff: get(values, fallback.dropoff) }),
       });
     }
@@ -183,5 +196,5 @@
     return out.join("\n");
   }
 
-  root.NexlWhatsApp = { driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
+  root.NexlWhatsApp = { portBooking, driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
 })(typeof window !== "undefined" ? window : globalThis);

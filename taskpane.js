@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.8";
+  const VERSION = "1.9.9";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -801,7 +801,7 @@
       .sort((a, b) => (a.driver || "~").localeCompare(b.driver || "~") || String(a.loadRef).localeCompare(String(b.loadRef)));
     const short = (x) => String(x || "?").replace(/\s*\((POL|VIA|POD)\)\s*/g, "");
     $("waDrvList").innerHTML = list.length ? list.map((l) => `<button type="button" class="drv ${state.waDrvSel === l.id ? "sel" : ""}" data-id="${esc(l.id)}">
-        <b class="mono">${esc(l.loadRef)}</b> <span class="muted small">${esc(l.instruction || "")}</span> · <b>${esc(l.driver || "no driver")}</b>
+        <b class="mono">${esc(l.loadRef)}</b> <span class="muted small">${esc(l.instruction || "")}</span> · <b>${esc(l.driver || "no driver")}</b>${l.portBooking ? ` <span class="small">· 🎫 ${esc(l.portBooking)}</span>` : ""}
         <span class="small drv-route">${esc(short(l.route.collect))} → ${esc((l.route.packing || []).map(short).join(" → ") || "?")} → ${esc(short(l.route.dropoff))}</span></button>`).join("")
       : `<p class="empty">No loads for this date.</p>`;
     $("waDrvList").querySelectorAll(".drv").forEach((b) => (b.onclick = () => { state.waDrvSel = b.dataset.id; renderDriver(); }));
