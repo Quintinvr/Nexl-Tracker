@@ -76,9 +76,58 @@
         vessel: get(r, "vessel"), loadRef: loadRef || container, container, seal: get(r, "seal"),
         tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed), remark, nexlHint, hasComment: !!comment,
         date: cols.loadDate === undefined ? "" : dateKey(r[cols.loadDate]),
+        instruction: get(r, "instruction"), driver: get(r, "driver"), transporter: get(r, "transporter"),
+        // Route for the driver message: Nexl's instruction route first, the sheet's depot/packstore/port as fallback.
+        route: routeFor(d, { collect: get(r, "emptyDepot"), packing: get(r, "packstore"), dropoff: get(r, "port") }),
       });
     });
     return loads;
+  }
+
+  function routeFor(d, sheet) {
+    const stops = parseRoute(((d && d.instr) || {}).route || "");
+    if (stops.length >= 2) {
+      return { source: "nexl", collect: stops[0].name, packing: stops.slice(1, -1).map((s) => s.name), dropoff: stops[stops.length - 1].name };
+    }
+    return { source: "sheet", collect: sheet.collect, packing: sheet.packing ? [sheet.packing] : [], dropoff: sheet.dropoff };
+  }
+
+  /**
+   * Basic job message for the driver:
+   *   Job on app
+   *
+   *   Collect - MSC COEGA
+   *   Packing - KHOLD COEGA COLDSTORE
+   *   Drop off - COEGA CT
+   */
+  function driverMessage(l, opts = {}) {
+    const e = !!opts.emoji, r = l.route || {}, f = opts.fields || {};
+    const line = (icon, label, v) => `${e ? icon + " " : ""}${label} - ${v || ""}`;
+    const out = [e ? "📱 Job on app" : "Job on app", ""];
+    // Optional on the Collect line: container and booking (imports / full exports).
+    const extra = [f.container && l.container && `Container: ${l.container}`, f.booking && l.booking && `Booking: ${l.booking}`].filter(Boolean);
+    out.push(line("📦", "Collect", r.collect) + (extra.length ? ` (${extra.join(" · ")})` : ""));
+    const packs = (r.packing || []).filter(Boolean); // no packing stop (e.g. imports: port -> depot) = no Packing line
+    packs.forEach((p, i) => out.push(line("🏭", packs.length > 1 ? `Packing ${i + 1}` : "Packing", p)));
+    out.push(line("⚓", "Drop off", r.dropoff));
+    return out.join("\n");
+  }
+
+  /** Driver jobs from any plan tab's rows ({row, values}) as read by the sync (current Nexl instructions only). */
+  function driverJobs(tab, sheetRows, cols, rowsMap, fallback) {
+    const get = (r, f) => (!f || cols[f] === undefined ? "" : clean(r[cols[f]]));
+    const out = [];
+    for (const { row, values } of sheetRows || []) {
+      const container = get(values, "container"), instruction = get(values, "instruction");
+      if (!instruction || (!container && !get(values, "loadRef"))) continue;
+      const d = rowsMap ? rowsMap[`${tab}|${row}`] : null;
+      out.push({
+        id: `${tab}|${row}`, row, tab, client: get(values, "customer"), loadRef: get(values, "loadRef") || container || instruction, container,
+        booking: get(values, "booking"), instruction, driver: get(values, "driver"), date: cols.loadDate === undefined ? "" : dateKey(values[cols.loadDate]),
+        route: routeFor(d, { collect: get(values, fallback.collect), packing: get(values, fallback.packing), dropoff: get(values, fallback.dropoff) }),
+      });
+    }
+    return out;
   }
 
   function byClient(loads) {
@@ -134,5 +183,5 @@
     return out.join("\n");
   }
 
-  root.NexlWhatsApp = { isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
+  root.NexlWhatsApp = { driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.9.6">
+  <link rel="stylesheet" href="taskpane.css?v=1.9.8">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -121,6 +121,10 @@
     </section>
 
     <section id="view-wa" class="view" hidden>
+      <div class="wa-mode" role="tablist">
+        <button type="button" data-mode="client" class="active">👥 Client</button>
+        <button type="button" data-mode="driver">🚚 Driver</button>
+      </div>
       <div class="wa-pick">
         <label class="wa-date">📅 Load date <select id="waDate"></select></label>
         <label class="wa-date">👤 Client <select id="waClient"></select></label>
@@ -133,8 +137,25 @@
         <label><input type="checkbox" data-f="booking"> Booking ref</label>
         <label class="wa-emoji"><input type="checkbox" id="waEmoji"> Emojis 😀</label>
       </div>
-      <p class="muted small">Loads on <b id="waTab">PE CITRUS</b> for the chosen load date and client, split per vessel. Tick the loads to include, or use <b>Copy</b> on a single load. The status is the controller's <b>COMMENT</b> on the sheet only (Nexl's status is shown in grey for reference, but not sent).</p>
+      <p class="muted small" id="waHelp">Loads on <b id="waTab">PE CITRUS</b> for the chosen load date and client, split per vessel. Tick the loads to include, or use <b>Copy</b> on a single load. The status is the controller's <b>COMMENT</b> on the sheet only (Nexl's status is shown in grey for reference, but not sent).</p>
       <div id="waList" class="list"></div>
+      <div id="waDriver" hidden>
+        <div class="wa-pick">
+          <label class="wa-date">📄 Sheet <select id="waDrvSheet"></select></label>
+        </div>
+        <div class="wa-opts">
+          <span class="muted small">Add on the Collect line:</span>
+          <label><input type="checkbox" id="waDrvCont"> Container</label>
+          <label><input type="checkbox" id="waDrvBook"> Booking</label>
+        </div>
+        <input id="waDrvSearch" type="search" class="full" placeholder="Search load ref, driver, instruction…">
+        <div id="waDrvList" class="drvlist"></div>
+        <div id="waDrvBox" class="wa" hidden>
+          <div class="wa-head"><b id="waDrvTitle"></b><span class="muted small" id="waDrvSrc"></span></div>
+          <textarea id="waDrvMsg" class="full wa-msg" rows="7"></textarea>
+          <div class="row-actions"><button id="waDrvCopy" class="primary small-btn" type="button">Copy driver message</button></div>
+        </div>
+      </div>
     </section>
 
     <section id="view-settings" class="view" hidden>
@@ -180,14 +201,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=1.9.6"></script>
-  <script src="nexl-parsers.js?v=1.9.6"></script>
-  <script src="matcher.js?v=1.9.6"></script>
-  <script src="nexl-client.js?v=1.9.6"></script>
-  <script src="wa.js?v=1.9.6"></script>
-  <script src="excel-io.js?v=1.9.6"></script>
+  <script src="config.js?v=1.9.8"></script>
+  <script src="nexl-parsers.js?v=1.9.8"></script>
+  <script src="matcher.js?v=1.9.8"></script>
+  <script src="nexl-client.js?v=1.9.8"></script>
+  <script src="wa.js?v=1.9.8"></script>
+  <script src="excel-io.js?v=1.9.8"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=1.9.6"></script>
-  <script src="taskpane.js?v=1.9.6"></script>
+  <script src="photo-check.js?v=1.9.8"></script>
+  <script src="taskpane.js?v=1.9.8"></script>
 </body>
 </html>

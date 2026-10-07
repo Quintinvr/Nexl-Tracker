@@ -41,7 +41,7 @@ window.NEXL_CONFIG = {
     customer:    [/^CUSTOMER$/i],
     container:   [/^CONTAINER$/i, /^CONTAINER NO\.?$/i, /^CONTAINER NUMBER$/i],
     seal:        [/^SEAL( NO\.?)?$/i],
-    booking:     [/^BOOKING (REF|NO\.?|REFERENCE)$/i],
+    booking:     [/^BOOKING (REF|NO\.?|REFERENCE)$/i, /^REFERENCE$/i],
     loadRef:     [/^LOAD REF$/i],
     vessel:      [/^VESSEL$/i],
     transporter: [/^TRANSPORTER$/i],
@@ -52,6 +52,13 @@ window.NEXL_CONFIG = {
     comment:     [/^COMMENTS?$/i, /^REMARKS?$/i, /^CONTROLLER COMMENTS?$/i],
     tare:        [/^TARE$/i],
     loadDate:    [/LOAD DATE$/i, /^LOADING DATE$/i, /^DATE$/i],
+    emptyDepot:  [/^EMPTY DEPOT$/i],
+    packstore:   [/^PACKSTORE$/i, /^PACK ?HOUSE$/i, /^COLDSTORE$/i],
+    port:        [/^PORT$/i],
+    whs:         [/^WHS$/i, /^WAREHOUSE$/i],
+    turnIn:      [/^TURN ?IN$/i],
+    pickup:      [/^PICK ?UP$/i],
+    deliver:     [/^DELIVER$/i, /^DELIVERY$/i],
   },
 
   // Tabs to check. `compare` lists the fields compared against Nexl on that tab.
@@ -60,6 +67,14 @@ window.NEXL_CONFIG = {
   nameAliases: {
     FL4U: ["FREIGHT LOGISTICS 4U", "FREIGHT LOGISTICS FOR YOU"],
   },
+
+  // WhatsApp > Driver: which sheets can be used, and which columns give the route when Nexl has none.
+  driverSheets: [
+    { name: "PE CITRUS", label: "PE CITRUS (exports)", fallback: { collect: "emptyDepot", packing: "packstore", dropoff: "port" } },
+    { name: "EXPORTS P.E", label: "EXPORTS P.E (exports)", fallback: { collect: "pickup", packing: "", dropoff: "deliver" } },
+    { name: "IMPORTS P.E", label: "IMPORTS P.E (imports)", fallback: { collect: "port", packing: "whs", dropoff: "turnIn" } },
+    { name: "PLUGGED IN - GROUNDED", label: "PLUGGED IN - GROUNDED (full exports)", fallback: { collect: "packstore", packing: "", dropoff: "port" } },
+  ],
 
   tabs: [
     {

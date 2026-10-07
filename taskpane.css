@@ -256,3 +256,13 @@ button.go-cell:hover { text-decoration: underline; }
 button.go-cell.mono { font-weight: 500; }
 .wa-none { color: var(--muted); font-style: italic; }
 .pill.writer { font-size: 11px; padding: 1px 7px; }
+
+/* WhatsApp: Client | Driver switch and driver job list */
+.wa-mode { display: flex; gap: 0; margin: 2px 0 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.wa-mode button { flex: 1; border: 0; background: var(--bg); color: var(--text); padding: 6px; font-weight: 600; cursor: pointer; font-size: 12.5px; }
+.wa-mode button.active { background: var(--accent); color: var(--accent-ink); }
+.drvlist { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; max-height: 340px; overflow: auto; }
+.drv { text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 6px; padding: 6px 8px; cursor: pointer; font-size: 12px; }
+.drv:hover { border-color: var(--accent); }
+.drv.sel { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.drv-route { display: block; color: var(--muted); margin-top: 2px; }

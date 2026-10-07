@@ -4,14 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.6";
+  const VERSION = "1.9.8";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true,
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true, waDrvSheet: "", waDrvFieldsBy: {},
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
@@ -769,6 +769,64 @@
   }
   const waOpts = () => ({ emoji: settings.waEmoji, fields: settings.waFields });
 
+  // ---------- Driver messages (WhatsApp > Driver) ----------
+  // Container / Booking on the Collect line: on by default for imports and full exports, off for PE CITRUS.
+  function drvFields(sheet) {
+    const saved = (settings.waDrvFieldsBy || {})[sheet];
+    if (saved) return saved;
+    const on = sheet !== CFG.whatsAppTab;
+    return { container: on, booking: on };
+  }
+  function driverSource() {
+    const sheets = CFG.driverSheets || [{ name: CFG.whatsAppTab, fallback: {} }];
+    const pick = sheets.find((x) => x.name === settings.waDrvSheet) || sheets[0];
+    if (pick.name === CFG.whatsAppTab) return { pick, loads: state.waAll || [], dated: true };
+    // Other sheets: the rows the last sync read (rows of instructions that are live in Nexl).
+    const t = state.input && state.input.usable.find((x) => x.name === pick.name);
+    const jobs = t ? NexlWhatsApp.driverJobs(t.name, t.rows, t.cols, state.result ? state.result.rows : {}, pick.fallback) : [];
+    return { pick, loads: jobs, dated: false };
+  }
+  function renderDriver() {
+    const src = driverSource();
+    const sel0 = $("waDrvSheet");
+    sel0.innerHTML = (CFG.driverSheets || []).map((x) => `<option value="${esc(x.name)}">${esc(x.label || x.name)}</option>`).join("");
+    sel0.value = src.pick.name;
+    $("waDate").parentElement.style.display = src.dated ? "" : "none";
+    const fl = drvFields(src.pick.name);
+    $("waDrvCont").checked = !!fl.container; $("waDrvBook").checked = !!fl.booking;
+    const day = src.dated ? waDatePick(src.loads) : "*";
+    const loads = src.loads.filter((l) => day === "*" || l.date === day);
+    const q = ($("waDrvSearch").value || "").trim().toUpperCase();
+    const list = loads.filter((l) => !q || [l.loadRef, l.driver, l.instruction, l.client, l.container].join(" ").toUpperCase().includes(q))
+      .sort((a, b) => (a.driver || "~").localeCompare(b.driver || "~") || String(a.loadRef).localeCompare(String(b.loadRef)));
+    const short = (x) => String(x || "?").replace(/\s*\((POL|VIA|POD)\)\s*/g, "");
+    $("waDrvList").innerHTML = list.length ? list.map((l) => `<button type="button" class="drv ${state.waDrvSel === l.id ? "sel" : ""}" data-id="${esc(l.id)}">
+        <b class="mono">${esc(l.loadRef)}</b> <span class="muted small">${esc(l.instruction || "")}</span> · <b>${esc(l.driver || "no driver")}</b>
+        <span class="small drv-route">${esc(short(l.route.collect))} → ${esc((l.route.packing || []).map(short).join(" → ") || "?")} → ${esc(short(l.route.dropoff))}</span></button>`).join("")
+      : `<p class="empty">No loads for this date.</p>`;
+    $("waDrvList").querySelectorAll(".drv").forEach((b) => (b.onclick = () => { state.waDrvSel = b.dataset.id; renderDriver(); }));
+    const sel = src.loads.find((l) => l.id === state.waDrvSel);
+    $("waDrvBox").hidden = !sel;
+    if (sel) {
+      $("waDrvTitle").textContent = `${sel.loadRef} · ${sel.driver || "no driver on the sheet"}`;
+      $("waDrvSrc").textContent = sel.route.source === "nexl" ? `route from Nexl ${sel.instruction}` : "route from the sheet (not found in Nexl)";
+      const key = [sel.id, settings.waEmoji, fl.container, fl.booking].join("|");
+      if (state.waDrvMsgFor !== key) { $("waDrvMsg").value = NexlWhatsApp.driverMessage(sel, { emoji: settings.waEmoji, fields: fl }); state.waDrvMsgFor = key; }
+    }
+  }
+  function setWaMode(m) {
+    state.waMode = m;
+    document.querySelectorAll(".wa-mode button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+    const drv = m === "driver";
+    $("waDriver").hidden = !drv; $("waList").hidden = drv;
+    $("waClient").parentElement.style.display = drv ? "none" : "";
+    if (!drv) $("waDate").parentElement.style.display = "";
+    document.querySelectorAll(".wa-opts [data-f]").forEach((cb) => (cb.parentElement.style.display = drv ? "none" : ""));
+    const lbl = document.querySelector("#view-wa > .wa-opts > span.muted"); if (lbl) lbl.style.display = drv ? "none" : "";
+    $("waHelp").hidden = drv;
+    renderWhatsApp();
+  }
+
   function renderWhatsApp() {
     const el = $("waList");
     $("waTab").textContent = CFG.whatsAppTab;
@@ -776,6 +834,7 @@
     document.querySelectorAll(".wa-opts [data-f]").forEach((cb) => (cb.checked = !!settings.waFields[cb.dataset.f]));
     const allClients = waClients();
     renderWaDates();
+    if (state.waMode === "driver") { renderDriver(); return; }
     // Client drop-down: one client at a time keeps it clean (or "All clients").
     if (allClients.length && state.waClient !== "*" && !allClients.some((c) => c.key === state.waClient)) state.waClient = allClients[0].key;
     const cs = $("waClient");
@@ -962,6 +1021,13 @@
     $("fillSel").addEventListener("click", () => doFill([...state.fillSel].map((k) => state.result.fills[k]).filter(Boolean)));
     $("hideBtn").addEventListener("click", hidePanel);
     $("waDate").addEventListener("change", () => { state.waDate = $("waDate").value; state.waEdits = {}; renderWhatsApp(); });
+    document.querySelectorAll(".wa-mode button").forEach((b) => b.addEventListener("click", () => setWaMode(b.dataset.mode)));
+    $("waDrvSearch").addEventListener("input", renderDriver);
+    $("waDrvSheet").addEventListener("change", () => { settings.waDrvSheet = $("waDrvSheet").value; saveSettings(); state.waDrvSel = null; renderDriver(); });
+    const setDrvField = (f, v) => { const n = driverSource().pick.name; settings.waDrvFieldsBy = { ...settings.waDrvFieldsBy, [n]: { ...drvFields(n), [f]: v } }; saveSettings(); renderDriver(); };
+    $("waDrvCont").addEventListener("change", () => setDrvField("container", $("waDrvCont").checked));
+    $("waDrvBook").addEventListener("change", () => setDrvField("booking", $("waDrvBook").checked));
+    $("waDrvCopy").addEventListener("click", () => copyText($("waDrvMsg").value, "Driver message"));
     $("waClient").addEventListener("change", () => { state.waClient = $("waClient").value; renderWhatsApp(); });
     if (canHide() && Office.addin.onVisibilityModeChanged) {
       Office.addin.onVisibilityModeChanged((a) => {
