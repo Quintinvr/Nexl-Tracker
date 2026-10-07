@@ -31,13 +31,33 @@
   }
 
   /** Lenient equality for names (customer / transporter). Empty on either side = nothing to compare. */
+  // Known short names used on the sheet (sheet value -> name in Nexl). Extend in config.js > nameAliases.
+  const ALIASES = { FL4U: ["FREIGHT LOGISTICS 4U", "FREIGHT LOGISTICS FOR YOU"] };
+  const aliasMap = () => {
+    const extra = (root.NEXL_CONFIG && root.NEXL_CONFIG.nameAliases) || {};
+    const m = {};
+    for (const [k, v] of Object.entries({ ...ALIASES, ...extra })) m[compact(k)] = [].concat(v).map(compact);
+    return m;
+  };
+  // "FOR" -> 4, "YOU" -> U, "TO" -> 2 ... so "Freight Logistics For You" and "Freight Logistics 4 U" both give FL4U.
+  const NUMWORD = { FOR: "4", FOUR: "4", TO: "2", TOO: "2", TWO: "2", YOU: "U", ONE: "1", AND: "N" };
+  function initialsVariants(s) {
+    const words = clean(s).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+    const out = new Set();
+    out.add(words.map((w) => w[0]).join(""));                                  // IOEC
+    out.add(words.map((w) => (/\d/.test(w) ? w : w[0])).join(""));            // FREIGHT LOGISTICS 4U -> FL4U
+    out.add(words.map((w) => (NUMWORD[w] || (/\d/.test(w) ? w : w[0]))).join("")); // FREIGHT LOGISTICS FOR YOU -> FL4U
+    return [...out];
+  }
   function nameMatch(a, b) {
     const ca = compact(a), cb = compact(b);
     if (!ca || !cb) return true;
     if (ca === cb || ca.includes(cb) || cb.includes(ca)) return true;
-    // Abbreviations: "IOEC" = "Indian Ocean Export Company"
-    const initials = (s) => clean(s).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean).map((w) => w[0]).join("");
-    if (ca.length >= 2 && (initials(b).startsWith(ca) || initials(a).startsWith(cb))) return true;
+    const al = aliasMap();
+    if ((al[ca] || []).some((x) => cb.startsWith(x) || x.startsWith(cb)) || (al[cb] || []).some((x) => ca.startsWith(x) || x.startsWith(ca))) return true;
+    // Abbreviations: "IOEC" = "Indian Ocean Export Company", "FL4U" = "Freight Logistics 4 U"
+    if (ca.length >= 2 && initialsVariants(b).some((i) => i.startsWith(ca))) return true;
+    if (cb.length >= 2 && initialsVariants(a).some((i) => i.startsWith(cb))) return true;
     const tb = new Set(tokens(b));
     return tokens(a).some((t) => tb.has(t) || [...tb].some((x) => x.startsWith(t) || t.startsWith(x)));
   }

@@ -56,6 +56,11 @@ window.NEXL_CONFIG = {
 
   // Tabs to check. `compare` lists the fields compared against Nexl on that tab.
   // `overrides` lets you pin a field to a column letter when the header is unreliable.
+  // Short names used on the sheet that can't be worked out automatically: "SHEET NAME": ["NAME IN NEXL", ...]
+  nameAliases: {
+    FL4U: ["FREIGHT LOGISTICS 4U", "FREIGHT LOGISTICS FOR YOU"],
+  },
+
   tabs: [
     {
       name: "PE CITRUS",
