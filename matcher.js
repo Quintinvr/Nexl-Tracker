@@ -378,7 +378,7 @@
         for (const i of (r.entry ? r.entry.issues : []).concat(progressIssues)) muted.add(i);
         if (r.entry) r.entry.issues = [];
         const live = ls.stage === "moving" || ls.stage === "allocated";
-        rowStatus.push({ tab: r.tab, row: r.row, step: live ? ls.short : "📋 Planned · no driver yet", alert: "", level: "" });
+        rowStatus.push({ tab: r.tab, row: r.row, id: r.id, step: live ? ls.short : "📋 Planned · no driver yet", alert: "", level: "" });
         rows[rk] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
           nexl: n, tracking: r.tracking, leg: ls, issues: [], fills: rowFills, ref: anchor, slip: slips[rk] || null, cutoff: r.cutoff || null, planned: true };
         stats.planned = (stats.planned || 0) + 1;
@@ -402,7 +402,7 @@
       else if (rowIssues.some((i) => i.ack && !i.bypass)) level = "ack";
       else if (parts.length) level = "ok"; // everything on the row was bypassed
       else if (n || r.tracking) level = "ok";
-      rowStatus.push({ tab: r.tab, row: r.row, step: ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
+      rowStatus.push({ tab: r.tab, row: r.row, id: r.id, step: ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
       rows[r.tab + "|" + r.row] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
         nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor,
         slip: slips[rk] || null, cutoff: r.cutoff || null };

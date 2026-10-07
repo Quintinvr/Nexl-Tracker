@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.5";
+  const VERSION = "1.9.6";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -116,9 +116,17 @@
 
       progress(0.22, "Reading plan tabs…");
       const tabsCfg = CFG.tabs.filter((t) => !settings.disabledTabs.includes(t.name));
-      const [sheetTabs, acks, extras, waGrid] = await Promise.all([ExcelIO.readPlanTabs({ ...CFG, tabs: tabsCfg }, bases), ExcelIO.readAcks().catch(() => ({})),
-        ExcelIO.readExtras(CFG).catch(() => ({})), ExcelIO.readTabValues(CFG.whatsAppTab).catch(() => null)]);
-      state.acks = acks; state.extras = extras; state.waGrid = waGrid;
+      // Light on Excel: STACK DATES / DATA - TRANSPORTER are re-read at most every 30 min, and the full
+      // PE CITRUS grid for WhatsApp only while the WhatsApp tab is open (or when you open it).
+      const t0 = performance.now();
+      const needExtras = !state.extrasAt || Date.now() - state.extrasAt > 30 * 60000;
+      const [sheetTabs, acks, extras] = await Promise.all([ExcelIO.readPlanTabs({ ...CFG, tabs: tabsCfg }, bases), ExcelIO.readAcks().catch(() => ({})),
+        needExtras ? ExcelIO.readExtras(CFG).catch(() => null) : Promise.resolve(null)]);
+      state.acks = acks;
+      if (extras) { state.extras = extras; state.extrasAt = Date.now(); }
+      if (state.view === "wa") state.waGrid = await ExcelIO.readTabValues(CFG.whatsAppTab).catch(() => state.waGrid);
+      else state.waGrid = null; // read again when the WhatsApp tab is opened
+      state.perf = { read: Math.round(performance.now() - t0) };
       const tabWarnings = sheetTabs.filter((t) => t.missing || t.error).map((t) => `${esc(t.name)}: ${t.missing ? "tab not found" : esc(t.error)}`);
       const usable = sheetTabs.filter((t) => !t.missing && !t.error);
 
@@ -145,6 +153,7 @@
       state.result = res;
       state.lastSyncAt = Date.now();
       $("lastSync").textContent = "Synced " + fmtTime(now);
+      if (state.perf) $("versions").title = `Last sync: reading the sheet ${state.perf.read} ms`;
       render();
       hideSplash();
       runPhotoChecks();
@@ -768,11 +777,11 @@
     const allClients = waClients();
     renderWaDates();
     // Client drop-down: one client at a time keeps it clean (or "All clients").
-    if (state.waClient !== "*" && !allClients.some((c) => c.key === state.waClient)) state.waClient = allClients[0] ? allClients[0].key : "*";
+    if (allClients.length && state.waClient !== "*" && !allClients.some((c) => c.key === state.waClient)) state.waClient = allClients[0].key;
     const cs = $("waClient");
     cs.innerHTML = `<option value="*">All clients (${allClients.length})</option>` + allClients.map((c) =>
       `<option value="${esc(c.key)}">${esc(c.client)} — ${c.loads.length} load${c.loads.length === 1 ? "" : "s"}</option>`).join("");
-    cs.value = state.waClient;
+    cs.value = state.waClient || "*";
     cs.parentElement.hidden = !allClients.length;
     const clients = state.waClient === "*" ? allClients : allClients.filter((c) => c.key === state.waClient);
     if (!clients.length) { el.innerHTML = `<p class="empty">No loads found on the ${esc(CFG.whatsAppTab)} tab${state.waAll && state.waAll.length ? " for this date" : ""}.</p>`; return; }
@@ -885,6 +894,9 @@
   // ---------- wiring ----------
   function showView(v) {
     state.view = v;
+    if (v === "wa" && !state.waGrid) { // load the WhatsApp data only when someone actually opens the tab
+      ExcelIO.readTabValues(CFG.whatsAppTab).then((g) => { state.waGrid = g; if (state.view === "wa") renderWhatsApp(); }).catch(() => {});
+    }
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
     for (const id of ["now", "issues", "live", "wa", "settings"]) $("view-" + id).hidden = id !== v;
     $("detail").classList.toggle("off", v === "wa" || v === "settings");
@@ -985,7 +997,11 @@
     showNextSync();
     setInterval(() => {
       if (!settings.auto) return;
-      if (Date.now() < state.nextSlot) return;
+      // Readers don't all hit Excel in the same second: the writer goes on the mark, readers 10-90 s later.
+      const delay = state.isWriter ? 0 : (state.readerOffset = state.readerOffset || 10000 + Math.floor(Math.random() * 80000));
+      if (Date.now() < state.nextSlot + delay) return;
+      // A hidden panel that isn't the writer only needs every 3rd slot (15 min).
+      if (state.hidden && !state.isWriter && (state.skipHidden = ((state.skipHidden || 0) + 1) % 3) !== 1) { state.nextSlot = nextSlot(); showNextSync(); return; }
       if (state.busy) return; // a sync is running: catch the slot as soon as it finishes
       state.nextSlot = nextSlot();
       showNextSync();

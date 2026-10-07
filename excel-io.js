@@ -194,6 +194,7 @@
     return res;
   }
 
+  const statusMem = new Map(); // tab -> { col, at, vals: Map(row -> [step, alert]) }
   async function writeStatusColumns(cfg, rowStatus) {
     const byTab = new Map();
     for (const r of rowStatus) { if (!byTab.has(r.tab)) byTab.set(r.tab, []); byTab.get(r.tab).push(r); }
@@ -211,17 +212,28 @@
           hdr.format.horizontalAlignment = "Center";
         }
 
-        // Current contents of our two columns for the rows we own, read as one block.
+        // What's in our two columns now. Remembered from the last write, so the sheet is only read again
+        // every 30 min (or when the columns moved) instead of on every sync.
         const minR = Math.min(...rows.map((r) => r.row)), maxR = Math.max(...rows.map((r) => r.row));
-        const cur = ws.getRangeByIndexes(minR - 1, c, maxR - minR + 1, 2);
-        cur.load("values");
-        await ctx.sync();
+        let mem = statusMem.get(tab);
+        // Rows inserted/deleted above? Then a row number now holds a different instruction: read the sheet again.
+        const shifted = mem && rows.some((r) => mem.ids.has(r.row) && mem.ids.get(r.row) !== String(r.id));
+        if (!mem || shifted || mem.col !== c || created || Date.now() - mem.at > 30 * 60000) {
+          const cur = ws.getRangeByIndexes(minR - 1, c, maxR - minR + 1, 2);
+          cur.load("values");
+          await ctx.sync();
+          mem = { col: c, at: Date.now(), vals: new Map(), ids: new Map() };
+          cur.values.forEach((v, i) => mem.vals.set(minR + i, [String(v[0]), String(v[1])]));
+          statusMem.set(tab, mem);
+        }
+        for (const r of rows) mem.ids.set(r.row, String(r.id));
         for (const r of rows) {
-          const old = cur.values[r.row - minR];
+          const old = mem.vals.get(r.row) || ["", ""];
           const want = [r.step || "", r.alert || ""];
           if (old[0] === want[0] && old[1] === want[1]) continue;
           const rng = ws.getRangeByIndexes(r.row - 1, c, 1, 2);
           rng.values = [want];
+          mem.vals.set(r.row, want);
           const a = ws.getRangeByIndexes(r.row - 1, c + 1, 1, 1);
           const st = LEVEL_STYLE[r.level];
           if (st) { a.format.fill.color = st.fill; a.format.font.color = st.font; }
@@ -243,8 +255,14 @@
   };
 
   /** Adds/updates/removes the add-in's own notes. issues: those with ref.col on a plan tab. */
+  let lastNotesSig = null, lastNotesAt = 0;
   async function syncNotes(cfg, issues, stamp) {
     if (!notesSupported()) return { supported: false };
+    // Loading every note is the heaviest read: skip it when the alerts haven't changed (re-check every 30 min).
+    const sig = JSON.stringify(issues.filter((i) => i.ref && i.ref.col && i.severity !== "info" && i.field !== "progress")
+      .map((i) => [i.ref.tab, i.ref.col, i.ref.row, i.message, i.nexl]));
+    if (sig === lastNotesSig && Date.now() - lastNotesAt < 30 * 60000) return { supported: true, added: 0, removed: 0, skipped: true };
+    lastNotesSig = sig; lastNotesAt = Date.now();
     const want = new Map(); // "tab|A1" -> text
     for (const i of issues) {
       if (!i.ref || !i.ref.col || i.severity === "info" || i.field === "progress") continue;
