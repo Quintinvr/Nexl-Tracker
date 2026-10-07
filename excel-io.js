@@ -90,9 +90,9 @@
       await ctx.sync();
       const created = ws.isNullObject;
       if (created) { ws = ctx.workbook.worksheets.add(cfg.checkTabName); }
-      ws.getRange("A1").values = [[`Nexl Check — last run ${stamp}. ${list.length} item(s). This tab is rewritten by the Nexl Check add-in; edits here are lost.`]];
+      if (!created && sig === lastSignature) return; // nothing changed: don't touch the workbook at all
+      ws.getRange("A1").values = [[`Nexl Check — updated ${stamp}. ${list.length} item(s). This tab is rewritten by the Nexl Check add-in; edits here are lost.`]];
       ws.getRange("A1").format.font.bold = true;
-      if (!created && sig === lastSignature) { await ctx.sync(); return; }
 
       const old = ws.getUsedRangeOrNullObject(true);
       await ctx.sync();
@@ -160,6 +160,40 @@
    * rowStatus: [{tab,row,step,alert,level}] for every plan row in scope.
    * Rows not in rowStatus (instructions no longer active in Nexl) keep their last status.
    */
+  // ---------------------------------------------------------------------------
+  // ONE writer per workbook. Many people have the panel open; if every panel writes the same cells at the
+  // same moment, Excel for the web can't merge the edits and the workbook crashes. A hidden NEXL_WRITER sheet
+  // holds [panel id, name, last write]; only that panel writes status columns / notes / NEXL CHECK.
+  // If it goes quiet for staleMin minutes (closed, PC asleep), the next panel takes over.
+  // ---------------------------------------------------------------------------
+  const WRITER_SHEET = "NEXL_WRITER";
+  async function claimWriter(id, name, staleMin = 12) {
+    let res = { isWriter: false, holder: "" };
+    await Excel.run(async (ctx) => {
+      let ws = ctx.workbook.worksheets.getItemOrNullObject(WRITER_SHEET);
+      await ctx.sync();
+      let cur = ["", "", ""];
+      if (!ws.isNullObject) {
+        const r = ws.getRange("A1:C1"); r.load("values"); await ctx.sync();
+        cur = r.values[0].map((v) => String(v || ""));
+      }
+      const fresh = cur[0] && Date.now() - Date.parse(cur[2] || 0) < staleMin * 60000;
+      if (fresh && cur[0] !== id) { res = { isWriter: false, holder: cur[1] || "another PC" }; return; }
+      if (ws.isNullObject) { ws = ctx.workbook.worksheets.add(WRITER_SHEET); ws.visibility = "Hidden"; }
+      ws.getRange("A1:C1").values = [[id, name || "", new Date().toISOString()]];
+      await ctx.sync();
+      res = { isWriter: true, holder: name || "" };
+    });
+    if (!res.isWriter) return res;
+    // Two panels may have claimed at the same moment: wait a little, re-read, the one that's left wins.
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1500));
+    await Excel.run(async (ctx) => {
+      const r = ctx.workbook.worksheets.getItem(WRITER_SHEET).getRange("A1:B1"); r.load("values"); await ctx.sync();
+      if (String(r.values[0][0]) !== id) res = { isWriter: false, holder: String(r.values[0][1] || "another PC") };
+    });
+    return res;
+  }
+
   async function writeStatusColumns(cfg, rowStatus) {
     const byTab = new Map();
     for (const r of rowStatus) { if (!byTab.has(r.tab)) byTab.set(r.tab, []); byTab.get(r.tab).push(r); }
@@ -170,10 +204,12 @@
         const { c, created } = await findStatusColumns(ctx, ws, cfg);
         colCache.set(tab, c);
         const H = cfg.headerRow - 1;
-        const hdr = ws.getRangeByIndexes(H, c, 1, 2);
-        hdr.values = [[cfg.statusColumns.stepHeader, cfg.statusColumns.alertHeader]];
-        hdr.format.font.bold = true; hdr.format.font.color = "#FFFFFF"; hdr.format.fill.color = "#203864";
-        hdr.format.horizontalAlignment = "Center";
+        if (created) { // header + style only once, not on every sync
+          const hdr = ws.getRangeByIndexes(H, c, 1, 2);
+          hdr.values = [[cfg.statusColumns.stepHeader, cfg.statusColumns.alertHeader]];
+          hdr.format.font.bold = true; hdr.format.font.color = "#FFFFFF"; hdr.format.fill.color = "#203864";
+          hdr.format.horizontalAlignment = "Center";
+        }
 
         // Current contents of our two columns for the rows we own, read as one block.
         const minR = Math.min(...rows.map((r) => r.row)), maxR = Math.max(...rows.map((r) => r.row));
@@ -406,5 +442,5 @@
 
   LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
 })(window);

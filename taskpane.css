@@ -255,3 +255,4 @@ button.go-cell { color: var(--accent); font-weight: 600; text-decoration: none; 
 button.go-cell:hover { text-decoration: underline; }
 button.go-cell.mono { font-weight: 500; }
 .wa-none { color: var(--muted); font-style: italic; }
+.pill.writer { font-size: 11px; padding: 1px 7px; }

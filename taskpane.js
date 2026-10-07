@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.4";
+  const VERSION = "1.9.5";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -19,7 +19,7 @@
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
 
   // ---------- state ----------
-  const state = { busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(), slips: {}, sealOk: new Set(),
+  const state = { panelId: Math.random().toString(36).slice(2) + Date.now().toString(36), isWriter: false, writerName: "", busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(), slips: {}, sealOk: new Set(),
     extras: {}, waGrid: null, waUnticked: new Set(), waEdits: {}, waClient: null };
   const fmtTime = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const fmtStamp = (d) => d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -153,6 +153,12 @@
       checkForUpdate();
       rememberLegs(res.legSamples);
 
+      // Only ONE panel writes to the workbook (see ExcelIO.claimWriter); everyone else just reads.
+      const w = await ExcelIO.claimWriter(state.panelId, settings.name || "a team member").catch(() => ({ isWriter: false, holder: "?" }));
+      state.isWriter = w.isWriter; state.writerName = w.holder;
+      showWriter();
+      if (!state.isWriter) { if (tabWarnings.length) banner(tabWarnings.join("<br>"), "warn"); return; }
+
       if (settings.writeTab) {
         progress(0.96, `Updating ${CFG.checkTabName} tab…`);
         const list = res.issues.filter((i) => !i.bypass && (settings.writeInfo || i.severity !== "info"));
@@ -180,7 +186,15 @@
     }
   }
 
+  function showWriter() {
+    const el = $("writerPill"); if (!el) return;
+    el.hidden = false;
+    el.textContent = state.isWriter ? "✍ updates the sheet" : `📖 read-only`;
+    el.title = state.isWriter ? "This panel writes NEXL STEP / NEXL ALERT, notes and the NEXL CHECK tab for the whole team."
+      : `${state.writerName || "Another panel"} writes the sheet. This panel only reads, so Excel isn't overloaded.`;
+  }
   async function writeColumns(warnings) {
+    if (!state.isWriter) return;
     if (!settings.statusCols || !state.result || !state.result.rowStatus.length) return;
     progress(0.97, "Updating NEXL STEP / NEXL ALERT columns…");
     try { await ExcelIO.writeStatusColumns(CFG, state.result.rowStatus); }
@@ -219,7 +233,7 @@
       state.acks = await ExcelIO.readAcks();
       toast(m ? `Snoozed for ${m} min — the team sees "👀 ${by}"` : wide ? `Bypass undone on every row of ${issue.instruction}` : issue.bypass ? "Bypass undone — the alert is back" : "Snooze removed");
       await recompute();
-      if (!m && issue.bypass && settings.notes) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
+      if (!m && issue.bypass && settings.notes && state.isWriter) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
     } catch (e) { toast("Couldn't save the snooze: " + e.message); }
   }
 
@@ -262,7 +276,7 @@
         state.acks = await ExcelIO.readAcks();
         toast(wide ? `✔ Bypassed on every row of ${base}${same.length > 1 ? ` (${same.length} rows)` : ""}` : `✔ Bypassed ${list.length === 1 ? "alert" : list.length + " alerts"} — the team sees "✔ ${by}"`);
         await recompute();
-        if (settings.notes) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
+        if (settings.notes && state.isWriter) await ExcelIO.syncNotes(CFG, state.result.issues.filter((x) => !x.bypass), fmtTime(new Date())).catch(() => {});
       } catch (e) { toast("Couldn't save the bypass: " + e.message); }
     };
   }
@@ -974,6 +988,7 @@
       if (Date.now() < state.nextSlot) return;
       if (state.busy) return; // a sync is running: catch the slot as soon as it finishes
       state.nextSlot = nextSlot();
+      showNextSync();
       sync().finally(showNextSync);
     }, 5000);
   });
