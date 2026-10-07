@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "1.9.2";
+  const VERSION = "1.9.3";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -438,7 +438,7 @@
       if (!ok) state.fillSel.delete(k);
       const p = photoOf(f);
       return `<div class="fill ${f.needsPhoto ? "photo" : ""}">${ok ? `<input type="checkbox" data-k="${k}" ${state.fillSel.has(k) ? "checked" : ""}>` : `<span class="nocb">🔒</span>`}
-      <span><b>${esc(f.tab)} ${esc(f.col + f.row)}</b> · ${esc(FIELD[f.field] || f.field)} ← <span class="mono">${esc(f.value)}</span>
+      <span><button class="link go-cell" data-go="${k}" type="button" title="Go to this cell on the sheet">📍 ${esc(f.tab)} ${esc(f.col + f.row)}</button> · ${esc(FIELD[f.field] || f.field)} ← <button class="link mono go-cell" data-go="${k}" type="button" title="Go to this cell on the sheet">${esc(f.value)}</button>
       <span class="muted">(${esc(f.instruction)} ${esc(f.container || "")})</span>
       ${f.needsPhoto ? `<br>${photoBadge(f)} ${p && p.photo ? `<button class="link xs" data-ph="${k}" type="button">${f.photoKind === "seal" && !ok ? "Check seal photo" : "View photo"}</button>` : ""}
         ${ok ? `<button class="primary xs" data-apply="${k}" type="button">Apply</button>` : ""}` : ""}
@@ -446,6 +446,14 @@
     }).join("");
     $("fillList").querySelectorAll("input").forEach((cb) => cb.onchange = () => { const k = +cb.dataset.k; cb.checked ? state.fillSel.add(k) : state.fillSel.delete(k); });
     $("fillList").querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(fills[+b.dataset.ph])));
+    $("fillList").querySelectorAll("[data-go]").forEach((b) => (b.onclick = (e) => {
+      e.preventDefault();
+      const f = fills[+b.dataset.go];
+      ExcelIO.goTo({ tab: f.tab, row: f.row, col: f.col }).catch(() => {});
+      showDetail(f.tab, f.row, true);
+    }));
+    const ready = fills.filter((f) => f.needsPhoto && fillAllowed(f)).length;
+    $("nReady").textContent = ready ? `· ${ready} container${ready === 1 ? "" : "s"} ready to apply ✓` : "";
     $("fillList").querySelectorAll("[data-slip]").forEach((b) => (b.onclick = () => showSlip(fills[+b.dataset.slip])));
     $("fillList").querySelectorAll("[data-apply]").forEach((b) => (b.onclick = () => doFill([fills[+b.dataset.apply]])));
   }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.9.2">
+  <link rel="stylesheet" href="taskpane.css?v=1.9.3">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -72,17 +72,17 @@
     <section id="detail" class="detail" hidden></section>
 
     <section id="view-now" class="view">
-      <div id="cutoffBox" class="cutoffs" hidden></div>
-      <h3 class="sec">Needs attention <span id="nNeed" class="count"></span></h3>
-      <div id="needList" class="list"><p class="empty">Press <b>Sync now</b> to compare the plan with Nexl.</p></div>
-
-      <details id="fillBox" class="box" hidden>
-        <summary>✍️ <b id="nFill">0</b> empty cell(s) can be filled from Nexl</summary>
-        <div class="muted small">Only empty cells are filled — nothing you've typed is overwritten. Container numbers from the app need a matching container photo before they can be applied 🔒.</div>
+      <details id="fillBox" class="box fillbox" open hidden>
+        <summary>✍️ <b id="nFill">0</b> empty cell(s) can be filled from Nexl <span id="nReady" class="ready"></span></summary>
+        <div class="muted small">Only empty cells are filled — nothing you've typed is overwritten. Container numbers from the app need a matching container photo before they can be applied 🔒. Click 📍 to jump to the cell on the sheet.</div>
         <div id="fillList" class="filllist"></div>
         <div class="row-actions"><button id="fillSel" class="primary small-btn" type="button">Fill selected</button>
           <button id="fillAll" class="ghost small-btn" type="button">Select all</button></div>
       </details>
+      <div id="cutoffBox" class="cutoffs" hidden></div>
+      <h3 class="sec">Needs attention <span id="nNeed" class="count"></span></h3>
+      <div id="needList" class="list"><p class="empty">Press <b>Sync now</b> to compare the plan with Nexl.</p></div>
+
 
       <h3 class="sec" id="roadHead">On the road <span id="nRoad" class="count"></span></h3>
       <div id="roadList" class="list compact"></div>
@@ -179,14 +179,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=1.9.2"></script>
-  <script src="nexl-parsers.js?v=1.9.2"></script>
-  <script src="matcher.js?v=1.9.2"></script>
-  <script src="nexl-client.js?v=1.9.2"></script>
-  <script src="wa.js?v=1.9.2"></script>
-  <script src="excel-io.js?v=1.9.2"></script>
+  <script src="config.js?v=1.9.3"></script>
+  <script src="nexl-parsers.js?v=1.9.3"></script>
+  <script src="matcher.js?v=1.9.3"></script>
+  <script src="nexl-client.js?v=1.9.3"></script>
+  <script src="wa.js?v=1.9.3"></script>
+  <script src="excel-io.js?v=1.9.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=1.9.2"></script>
-  <script src="taskpane.js?v=1.9.2"></script>
+  <script src="photo-check.js?v=1.9.3"></script>
+  <script src="taskpane.js?v=1.9.3"></script>
 </body>
 </html>
