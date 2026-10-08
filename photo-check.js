@@ -153,7 +153,7 @@
       const img = await image(up.container);
       const w = await ocrWorker();
       const r = await w.recognize(img);
-      return Object.assign(verifyContainer(r.data.text, fill.value), { photo: img, photoPath: up.container });
+      return Object.assign(verifyContainer(r.data.text, fill.value), { photo: img, photoPath: up.container, text: r.data.text });
     }).catch((e) => ({ status: "error", detail: "Photo check failed: " + (e.message || e) })));
     cache.set(key, p);
     p.then((r) => { if (r.status === "error") cache.delete(key); });

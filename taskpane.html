@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=2.0.0">
+  <link rel="stylesheet" href="taskpane.css?v=2.1.0">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -79,6 +79,11 @@
         <div id="fillList" class="filllist"></div>
         <div class="row-actions"><button id="fillSel" class="primary small-btn" type="button">Fill selected</button>
           <button id="fillAll" class="ghost small-btn" type="button">Select all</button></div>
+      </details>
+      <details id="fixBox" class="box fillbox fixbox" open hidden>
+        <summary>📷 <b id="nFix">0</b> number(s) on the sheet don't match Nexl</summary>
+        <div class="muted small">A seal or container that differs from Nexl (e.g. a digit missing). Check the driver's photo, pick the right number and it's put in the sheet for you.</div>
+        <div id="fixList" class="filllist"></div>
       </details>
       <div id="cutoffBox" class="cutoffs" hidden></div>
       <h3 class="sec">Needs attention <span id="nNeed" class="count"></span></h3>
@@ -202,14 +207,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=2.0.0"></script>
-  <script src="nexl-parsers.js?v=2.0.0"></script>
-  <script src="matcher.js?v=2.0.0"></script>
-  <script src="nexl-client.js?v=2.0.0"></script>
-  <script src="wa.js?v=2.0.0"></script>
-  <script src="excel-io.js?v=2.0.0"></script>
+  <script src="config.js?v=2.1.0"></script>
+  <script src="nexl-parsers.js?v=2.1.0"></script>
+  <script src="matcher.js?v=2.1.0"></script>
+  <script src="nexl-client.js?v=2.1.0"></script>
+  <script src="wa.js?v=2.1.0"></script>
+  <script src="excel-io.js?v=2.1.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=2.0.0"></script>
-  <script src="taskpane.js?v=2.0.0"></script>
+  <script src="photo-check.js?v=2.1.0"></script>
+  <script src="taskpane.js?v=2.1.0"></script>
 </body>
 </html>

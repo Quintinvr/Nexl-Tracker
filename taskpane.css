@@ -269,3 +269,12 @@ button.go-cell.mono { font-weight: 500; }
 #waDrvBox { margin-bottom: 10px; scroll-margin-top: 8px; }
 #waDrvBox.flash { animation: drvflash 1.2s ease-out; }
 @keyframes drvflash { 0% { box-shadow: 0 0 0 3px #25d366; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.fixbox { border-color: #d9534f; background: color-mix(in srgb, #d9534f 6%, var(--bg)); }
+.fxvals { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 8px 0; }
+.fxvals > div { border: 1px solid var(--line, #ccc); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.fxvals mark { background: #ffd54f; color: #000; border-radius: 2px; padding: 0 1px; }
+.fxvals .dgap { color: #d9534f; font-size: 11px; vertical-align: top; }
+.fxtype { display: flex; gap: 6px; }
+.fxtype input { flex: 1; min-width: 0; text-transform: uppercase; padding: 4px 6px; font-size: 14px; }
+.cphoto.zoomable { cursor: zoom-in; }
+.cphoto.zoom { max-height: none; width: 100%; cursor: zoom-out; }

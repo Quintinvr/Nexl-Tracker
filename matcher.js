@@ -203,8 +203,20 @@
           if (f === "seal") {
             const nv = /^\d{1,2}$/.test(hit.seal) ? "" : hit.seal; // Nexl uses "1" as a placeholder
             const a = compact(sv), b2 = compact(nv);
-            const sameSeal = a === b2 || (Math.min(a.length, b2.length) >= 6 && (a.endsWith(b2) || b2.endsWith(a))); // "ML-ZA6724086" = "ZA6724086"
-            if (sv && nv && !sameSeal) add("error", "seal", sv, nv, "Seal number differs");
+            // "ML-ZA6724086" = "ZA6724086": a letter prefix of 2+ is a seal brand. One missing character is a typo, not a prefix.
+            // The prefix must be written apart ("ML-", "ML ") so a dropped first character still counts as a difference.
+            const prefixOnly = (longRaw, short) => {
+              const segs = String(longRaw || "").toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+              for (let k = 1; k < segs.length; k++)
+                if (segs.slice(k).join("") === short && /^[A-Z]+$/.test(segs.slice(0, k).join("")) && short.length >= 6) return true;
+              return false;
+            };
+            const sameSeal = a === b2 || prefixOnly(sv, b2) || prefixOnly(nv, a);
+            if (sv && nv && !sameSeal) {
+              const typo = editDistance(a, b2) <= 2;
+              add("error", "seal", sv, nv, typo ? `Seal number differs: looks like a typo (${a.length < b2.length ? "character missing" : a.length > b2.length ? "extra character" : "wrong character"})` : "Seal number differs");
+              Object.assign(entry.issues[entry.issues.length - 1], { fix: "seal", nexlRowId: hit.rowId || "" });
+            }
             else if (!sv && nv) add("info", "seal", "", nv, "Seal not on sheet yet");
             else if (sv && !nv) add("info", "seal", sv, "", "Seal not captured in Nexl yet");
           } else if (f === "booking") {
@@ -251,7 +263,11 @@
         if (twin) {
           twin.twin = n;
           const iss = twin.issues.find((i) => i.field === "container" || i.field === "instruction");
-          if (iss) { iss.nexl = n.container; iss.message = `Possible typo: Nexl has ${n.container} on ${n.instruction}`; }
+          if (iss) {
+            const a = compact(twin.container), how = a.length < n.key.length ? "character missing" : a.length > n.key.length ? "extra character" : "wrong character";
+            iss.nexl = n.container; iss.message = `Possible typo (${how}): Nexl has ${n.container} on ${n.instruction}`;
+            if (iss.field === "container") Object.assign(iss, { fix: "container", nexlRowId: n.rowId || "" });
+          }
           n.used = true;
           continue;
         }

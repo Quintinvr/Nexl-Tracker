@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.0.0";
+  const VERSION = "2.1.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -414,31 +414,108 @@
     if ($("seYes")) $("seYes").onclick = () => { state.sealOk.add(photoKey(f)); closeModal(); doFill([f]); };
     if ($("seNo")) $("seNo").onclick = () => { closeModal(); toast("Left blank. Check the seal with the driver or in Nexl."); };
   }
-  // A seal that differs between sheet and Nexl: show the photo and let the controller decide.
-  async function sealIssuePhoto(i) {
+  // ---------- Check photo & fix: sheet value ≠ Nexl (seal, or a container with a typo / missing digit) ----------
+  // Shows the driver's photo next to both numbers (differences highlighted) and lets the controller pick
+  // the right one, or type what the photo shows, and puts it in the sheet cell.
+  function diffMark(a, b) { // HTML of a with the characters that aren't in b highlighted
+    a = String(a || ""); b = String(b || "");
+    const L = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--)
+      L[i][j] = a[i].toUpperCase() === b[j].toUpperCase() ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    let i = 0, j = 0, out = "";
+    while (i < a.length) {
+      if (j < b.length && a[i].toUpperCase() === b[j].toUpperCase()) { out += esc(a[i]); i++; j++; }
+      else if (j < b.length && L[i][j + 1] > L[i + 1][j]) { out += `<span class="dgap" title="missing here">▾</span>`; j++; }
+      else { out += `<mark>${esc(a[i])}</mark>`; i++; }
+    }
+    if (j < b.length) out += `<span class="dgap" title="missing here">▾</span>`;
+    return out;
+  }
+  const isoHint = (v) => {
+    const c = String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!/^[A-Z]{4}\d{7}$/.test(c)) return `<span class="pbadge bad">✗ ${c.length} characters (should be 4 letters + 7 digits)</span>`;
+    return NexlPhotoCheck.iso6346Valid(c) ? `<span class="pbadge ok">✓ valid number</span>` : `<span class="pbadge bad">✗ check digit wrong</span>`;
+  };
+  async function fixWithPhoto(i) {
+    if (!i) return;
+    const isSeal = i.fix === "seal" || i.field === "seal";
+    const what = isSeal ? "Seal" : "Container";
     const d = state.result.rows[i.ref.tab + "|" + i.ref.row];
-    const rowId = d && d.nexl && d.nexl.rowId;
-    if (!rowId) { toast("Can't find this container's photos in Nexl."); return; }
-    modal("Seal photo", `<p class="small">Loading the seal photo…</p>`);
-    const r = await NexlPhotoCheck.sealPhoto(rowId).catch((e) => ({ status: "error", detail: String(e.message || e) }));
-    modal(`Seal photo · ${i.container}`, `${r.photo ? `<img class="cphoto" src="${esc(r.photo)}" alt="Seal photo">` : `<p class="small">${esc(r.detail || "No photo.")}</p>`}
-      <p class="small">Sheet: <b class="mono">${esc(i.sheet)}</b> · Nexl: <b class="mono">${esc(i.nexl)}</b><br>Which one does the photo show?</p>
-      <div class="row-actions">${r.photo ? `<button id="spSheet" class="ghost small-btn" type="button">Sheet is right (${esc(i.sheet)})</button>
-      <button id="spNexl" class="ghost small-btn" type="button">Nexl is right (${esc(i.nexl)})</button>` : ""}</div>`);
-    if ($("spSheet")) $("spSheet").onclick = async () => {
+    const rowId = i.nexlRowId || (d && d.nexl && d.nexl.rowId) || "";
+    const cell = `${i.ref.tab} ${i.ref.col}${i.ref.row}`;
+    const nexlVal = String(i.nexl || "").split(" | ")[0];
+    const title = `Check & fix ${what.toLowerCase()} · ${cell}`;
+    modal(title, `<p class="small">Loading the ${what.toLowerCase()} photo from Nexl…</p>`);
+    let r = { status: "norow", detail: "Can't find this container's photos in Nexl" };
+    if (rowId && window.NexlPhotoCheck) {
+      r = await (isSeal ? NexlPhotoCheck.sealPhoto(rowId) : NexlPhotoCheck.check({ value: nexlVal, nexlRowId: rowId }))
+        .catch((e) => ({ status: "error", detail: String(e.message || e) }));
+    }
+    if ($("modal").hidden) return; // closed while loading
+    let verdict = "";
+    if (!isSeal && r.photo) {
+      const sheetOnPhoto = r.text ? NexlPhotoCheck.verifyContainer(r.text, i.sheet).status === "match" : false;
+      verdict = r.status === "match" ? `<span class="pbadge ok">📷 Photo matches Nexl</span>`
+        : sheetOnPhoto ? `<span class="pbadge ok">📷 Photo matches the sheet</span>`
+        : r.status === "mismatch" ? `<span class="pbadge bad">📷 Photo shows ${esc(r.seen || "another number")}</span>`
+        : `<span class="pbadge warn">📷 Couldn't read the photo — check by eye</span>`;
+    }
+    const best = !isSeal && r.status === "match" ? nexlVal : "";
+    modal(title, `${r.photo ? `<img class="cphoto zoomable" id="fxImg" src="${esc(r.photo)}" alt="${what} photo" title="Click to zoom">` : `<p class="small pbadge warn">📷 ${esc(r.detail || "No photo uploaded yet.")}</p>`}
+      ${verdict ? `<p class="small">${verdict}</p>` : ""}
+      <div class="fxvals">
+        <div><span class="muted small">On the sheet</span><b class="mono big-seal">${diffMark(i.sheet, nexlVal)}</b>${isSeal ? "" : isoHint(i.sheet)}</div>
+        <div><span class="muted small">In Nexl</span><b class="mono big-seal">${diffMark(nexlVal, i.sheet)}</b>${isSeal ? "" : isoHint(nexlVal)}</div>
+      </div>
+      <p class="small">Which one does the photo show?</p>
+      <div class="row-actions">
+        <button id="fxNexl" class="${best || isSeal ? "primary" : "ghost"} small-btn" type="button">✓ Nexl is right — put ${esc(nexlVal)} in ${esc(i.ref.col + i.ref.row)}</button>
+        <button id="fxSheet" class="ghost small-btn" type="button">Sheet is right (${esc(i.sheet)})</button>
+      </div>
+      <p class="small muted" style="margin:10px 0 4px">Photo shows something else? Type it:</p>
+      <div class="fxtype"><input id="fxVal" class="mono" value="${esc(nexlVal)}" autocomplete="off" spellcheck="false"><button id="fxPut" class="ghost small-btn" type="button">Put in sheet</button></div>
+      <p class="small" id="fxWarn"></p>
+      <div class="row-actions"><button id="fxOpen" class="link xs" type="button">Open in Nexl ↗</button></div>`);
+    if ($("fxImg")) $("fxImg").onclick = () => $("fxImg").classList.toggle("zoom");
+    const put = async (v) => {
       closeModal();
-      const by = await ensureName();
-      await ExcelIO.writeAck(i.key, by, 0, `Seal photo shows ${i.sheet} (Nexl needs correcting)`, { kind: "bypass", fp: NexlMatcher.issueFp(i) });
-      state.acks = await ExcelIO.readAcks();
-      toast(`✔ Bypassed — seal photo shows ${i.sheet}. Remember to correct Nexl.`);
-      await recompute();
-    };
-    if ($("spNexl")) $("spNexl").onclick = async () => {
-      closeModal();
-      const ok = await ExcelIO.replaceCell({ tab: i.ref.tab, row: i.ref.row, col: i.ref.col, value: i.nexl }, i.sheet).catch(() => false);
-      toast(ok ? `Seal in ${i.ref.tab} ${i.ref.col}${i.ref.row} changed to ${i.nexl}.` : "The cell changed since the last sync — not overwritten. Sync and try again.");
+      const ok = await ExcelIO.replaceCell({ tab: i.ref.tab, row: i.ref.row, col: i.ref.col, value: v }, i.sheet).catch(() => false);
+      toast(ok ? `${what} in ${cell} changed to ${v}.` : "The cell changed since the last sync — not overwritten. Sync and try again.");
       if (ok) setTimeout(sync, 400);
     };
+    $("fxNexl").onclick = () => put(nexlVal);
+    $("fxSheet").onclick = async () => {
+      closeModal();
+      const by = await ensureName();
+      await ExcelIO.writeAck(i.key, by, 0, `${what} photo shows ${i.sheet} (Nexl needs correcting)`, { kind: "bypass", fp: NexlMatcher.issueFp(i) });
+      state.acks = await ExcelIO.readAcks();
+      toast(`✔ Kept ${i.sheet} on the sheet. Remember to correct Nexl.`);
+      await recompute();
+    };
+    let warned = "";
+    $("fxPut").onclick = () => {
+      const v = $("fxVal").value.trim().toUpperCase();
+      if (!v) return;
+      const c = v.replace(/[^A-Z0-9]/g, "");
+      const bad = !isSeal && !(/^[A-Z]{4}\d{7}$/.test(c) && NexlPhotoCheck.iso6346Valid(c));
+      if (bad && warned !== v) { warned = v; $("fxWarn").innerHTML = `${isoHint(v)} Check it, or press <b>Put in sheet</b> again to use it anyway.`; return; }
+      put(isSeal ? v : c);
+    };
+    $("fxOpen").onclick = () => openNexl(i.container || nexlVal, "container", i.instruction);
+  }
+  const sealIssuePhoto = fixWithPhoto; // older name
+  const fixable = (i) => i && i.fix && !i.bypass && i.severity === "error"; // "I'm on it" can still fix; a bypass means it's OK as is
+  function renderFixes() {
+    const res = state.result; if (!res) return;
+    const list = res.issues.filter(fixable);
+    $("fixBox").hidden = !list.length;
+    $("nFix").textContent = list.length;
+    $("fixList").innerHTML = list.map((i, k) => `<div class="fill"><span>
+      <button class="link go-cell" data-go="${k}" type="button" title="Go to this cell on the sheet">📍 ${esc(i.ref.tab)} ${esc(i.ref.col + i.ref.row)}</button> · ${i.fix === "seal" ? "Seal" : "Container"}
+      <span class="mono">${esc(i.sheet)}</span> → Nexl <b class="mono">${esc(String(i.nexl).split(" | ")[0])}</b> <span class="muted">(${esc(i.instruction)})</span>
+      <br><button class="primary xs" data-fx="${k}" type="button">📷 Check photo & fix</button></span></div>`).join("");
+    $("fixList").querySelectorAll("[data-fx]").forEach((b) => (b.onclick = () => fixWithPhoto(list[+b.dataset.fx])));
+    $("fixList").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => { const i = list[+b.dataset.go]; ExcelIO.goTo(i.ref).catch(() => {}); showDetail(i.ref.tab, i.ref.row, true); }));
   }
   function showPhoto(f) {
     if (f.photoKind === "seal") return showSealPhoto(f);
@@ -584,7 +661,7 @@
         ${extra ? `<div class="small">${extra}</div>` : ""}
         <div class="card-actions">
           <button class="ghost xs" data-act="go">Go</button>
-          ${i.field === "seal" && i.severity === "error" && !i.ack ? `<button class="ghost xs" data-act="sealphoto">📷 Seal photo</button>` : ""}
+          ${fixable(i) ? `<button class="ghost xs" data-act="sealphoto">📷 Check photo & fix</button>` : ""}
           ${ackButtons(i)}
           <button class="ghost xs" data-act="nexl" data-word="${esc(word)}" data-filter="${filter}">Nexl ↗</button>
           <span class="muted small since">${i.ack ? ackTag(i) : since ? fmtTime(since) : ""}</span>
@@ -601,7 +678,7 @@
       </dl>
       <div class="card-actions">
         <button class="ghost xs" data-act="go">Go to row</button>
-        ${i.field === "seal" && i.severity === "error" && !i.ack ? `<button class="ghost xs" data-act="sealphoto">📷 Seal photo</button>` : ""}
+        ${fixable(i) ? `<button class="ghost xs" data-act="sealphoto">📷 Check photo & fix</button>` : ""}
         ${opts.noSnooze && !i.ack ? "" : ackButtons(i)}
         <button class="ghost xs" data-act="nexl" data-word="${esc(word)}" data-filter="${filter}">Nexl ↗</button>
       </div></div>`;
@@ -646,6 +723,7 @@
     wireCards(nl, need);
 
     renderFills();
+    renderFixes();
 
     // On the road
     const road = Object.values(res.rows).filter((d) => d.leg.stage === "moving" || d.leg.stage === "allocated")
@@ -957,14 +1035,14 @@
         : `<button class="ghost xs" data-fill="${k}">Fill ${esc(FIELD[f.field] || f.field)} ← ${esc(f.value)}</button>`).join("")}</div>` : ""}
       <div class="row-actions">
         <button class="primary small-btn" id="dNexl" type="button">Open in Nexl ↗</button>
-        ${issues.some((i) => i.field === "seal" && i.severity === "error" && !i.ack) ? `<button class="ghost small-btn" id="dSeal" type="button">📷 Seal photo</button>` : ""}
+        ${issues.some(fixable) ? `<button class="ghost small-btn" id="dSeal" type="button">📷 Check photo & fix</button>` : ""}
         ${issues.some((i) => !i.ack) ? `<button class="ghost small-btn" id="dSnooze" type="button">👀 I'm on it</button><button class="ghost small-btn" id="dBypass" type="button">✔ Bypass</button>` : ""}
       </div>`;
     $("dClose").onclick = () => { box.hidden = true; state.selected = null; };
     $("dNexl").onclick = () => openNexl(word, d.container ? "container" : "instruction", d.id);
     if ($("dSnooze")) $("dSnooze").onclick = async () => { for (const i of issues.filter((x) => !x.ack)) await snooze(i); };
     if ($("dSlip")) $("dSlip").onclick = () => showSlip({ slipPath: d.slip.path, container: d.container, instruction: d.id, value: "", tab, row, col: "" , slipKind: /IMPORT/i.test(tab) ? "collected" : "stacked" });
-    if ($("dSeal")) $("dSeal").onclick = () => sealIssuePhoto(issues.find((i) => i.field === "seal" && i.severity === "error" && !i.ack));
+    if ($("dSeal")) $("dSeal").onclick = () => fixWithPhoto(issues.find(fixable));
     if ($("dBypass")) $("dBypass").onclick = () => bypass(issues.filter((x) => !x.ack));
     box.querySelectorAll("[data-fill]").forEach((b) => (b.onclick = () => doFill([d.fills[+b.dataset.fill]])));
     box.querySelectorAll("[data-ph]").forEach((b) => (b.onclick = () => showPhoto(d.fills[+b.dataset.ph])));
