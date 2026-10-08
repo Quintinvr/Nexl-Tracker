@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.1.0";
+  const VERSION = "2.1.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -458,7 +458,7 @@
       verdict = r.status === "match" ? `<span class="pbadge ok">📷 Photo matches Nexl</span>`
         : sheetOnPhoto ? `<span class="pbadge ok">📷 Photo matches the sheet</span>`
         : r.status === "mismatch" ? `<span class="pbadge bad">📷 Photo shows ${esc(r.seen || "another number")}</span>`
-        : `<span class="pbadge warn">📷 Couldn't read the photo — check by eye</span>`;
+        : `<span class="pbadge warn">📷 Couldn't read the number clearly — check the photo by eye</span>`;
     }
     const best = !isSeal && r.status === "match" ? nexlVal : "";
     modal(title, `${r.photo ? `<img class="cphoto zoomable" id="fxImg" src="${esc(r.photo)}" alt="${what} photo" title="Click to zoom">` : `<p class="small pbadge warn">📷 ${esc(r.detail || "No photo uploaded yet.")}</p>`}

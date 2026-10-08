@@ -168,7 +168,9 @@ h3.sec { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--
 
 /* ---- Modal / toast ---- */
 .modal { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 12px; }
-.modal-card { background: var(--bg); border-radius: 8px; width: 100%; max-width: 420px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+.modal-card { background: var(--bg); border-radius: 8px; width: 100%; max-width: 420px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.modal-head { position: sticky; top: -12px; background: var(--bg); z-index: 1; padding-top: 2px; }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .full { width: 100%; padding: 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
 input.full { font-family: inherit; font-size: 13px; }

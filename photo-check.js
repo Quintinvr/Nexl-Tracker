@@ -83,7 +83,9 @@
     const other = /([A-Z]{3}U)(\d{6})(\d?)/.exec(text.replace(/\|/g, " "));
     if (other && (other[1] !== owner || other[2] !== serial)) {
       const seenNo = other[1] + other[2] + (other[3] || "");
-      if (other[1] === owner || iso6346Valid(seenNo.length === 11 ? seenNo : "") || other[2].length === 6) {
+      // Only say "photo shows another number" when the full number was read and its ISO check digit is right;
+      // a partial read (e.g. "HLBU 914015" for HLBU 914918 1) is just an unclear photo.
+      if (seenNo.length === 11 && iso6346Valid(seenNo)) {
         return { status: "mismatch", seen: `${other[1]} ${other[2]}${other[3] ? " " + other[3] : ""}`, detail: `Photo shows ${other[1]} ${other[2]}, the app says ${owner} ${serial} ${check}` };
       }
     }
