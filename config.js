@@ -66,6 +66,7 @@ window.NEXL_CONFIG = {
   // Short names used on the sheet that can't be worked out automatically: "SHEET NAME": ["NAME IN NEXL", ...]
   nameAliases: {
     FL4U: ["FREIGHT LOGISTICS 4U", "FREIGHT LOGISTICS FOR YOU"],
+    FRUITION: ["FRUIT UNLIMITED"],
   },
 
   // WhatsApp > Driver: which sheets can be used, and which columns give the route when Nexl has none.

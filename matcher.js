@@ -32,7 +32,7 @@
 
   /** Lenient equality for names (customer / transporter). Empty on either side = nothing to compare. */
   // Known short names used on the sheet (sheet value -> name in Nexl). Extend in config.js > nameAliases.
-  const ALIASES = { FL4U: ["FREIGHT LOGISTICS 4U", "FREIGHT LOGISTICS FOR YOU"] };
+  const ALIASES = { FL4U: ["FREIGHT LOGISTICS 4U", "FREIGHT LOGISTICS FOR YOU"], FRUITION: ["FRUIT UNLIMITED"] };
   const aliasMap = () => {
     const extra = (root.NEXL_CONFIG && root.NEXL_CONFIG.nameAliases) || {};
     const m = {};
