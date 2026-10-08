@@ -58,9 +58,16 @@
     // Abbreviations: "IOEC" = "Indian Ocean Export Company", "FL4U" = "Freight Logistics 4 U"
     if (ca.length >= 2 && initialsVariants(b).some((i) => i.startsWith(ca))) return true;
     if (cb.length >= 2 && initialsVariants(a).some((i) => i.startsWith(cb))) return true;
-    const tb = new Set(tokens(b));
-    return tokens(a).some((t) => tb.has(t) || [...tb].some((x) => x.startsWith(t) || t.startsWith(x)));
+    // Shared word: only a distinctive one counts. Generic trade words ("FRUIT", "EXPORTS", "FARMS"...) are
+    // shared by many clients, so "FRUITION" must not match "CORE FRUIT" just because both say FRUIT.
+    const own = (s) => tokens(s).filter((t) => !GENERIC.has(t) && t.length >= 4);
+    const tb = own(b);
+    return own(a).some((t) => tb.some((x) => x === t || x.startsWith(t) || t.startsWith(x)));
   }
+  const GENERIC = new Set(["FRUIT", "FRUITS", "CITRUS", "FRESH", "PRODUCE", "PRODUCER", "PRODUCERS", "EXPORT", "EXPORTS", "EXPORTERS",
+    "IMPORT", "IMPORTS", "FARM", "FARMS", "FARMING", "PACK", "PACKERS", "PACKHOUSE", "AGRI", "AGRICULTURE", "ESTATE", "ESTATES",
+    "GLOBAL", "INTERNATIONAL", "SHIPPING", "LINE", "LINES", "CONTAINER", "CONTAINERS", "TRUCKING", "GENERAL", "COMPANY",
+    "MARKETING", "DISTRIBUTION", "ENTERPRISES", "INVESTMENTS", "LIMITED", "EMPTIES", "COLD", "STORAGE", "CAPE", "EAST", "EASTERN", "WEST", "WESTERN"]);
 
   /** Strict-ish equality for vessels: one must contain the other once spaces are removed. */
   function vesselMatch(a, candidates) {
