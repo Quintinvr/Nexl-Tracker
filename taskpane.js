@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.3.1";
+  const VERSION = "2.4.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -952,10 +952,15 @@
     const helper = new URL("open-wa.html", location.href);
     helper.search = "";
     helper.hash = new URLSearchParams({ app: links.app, web: links.web, mode }).toString();
-    const w = window.open(helper.toString(), "nexl-whatsapp");
-    if (!w) { toast("The browser blocked the WhatsApp tab — allow pop-ups for this site, then try again."); }
+    // WhatsApp Web already open in a tab (any window)? Use that tab (needs bridge 1.4). Otherwise the helper tab.
+    let reused = false;
+    if (mode !== "app") { const r = await NexlClient.openWhatsApp(links.web).catch(() => null); reused = !!(r && r.ok); }
+    if (!reused) {
+      const w = window.open(helper.toString(), "nexl-whatsapp");
+      if (!w) toast("The browser blocked the WhatsApp tab — allow pop-ups for this site, then try again.");
+    }
     const paste = `<p class="big-step">📋 The message is copied.<br>Click in the message box, press <b>Ctrl+V</b>, then <b>Enter</b>.</p>`;
-    const opening = mode === "web" ? "WhatsApp Web is opening" : mode === "app" ? "The WhatsApp app is opening" : "WhatsApp is opening (the app, or WhatsApp Web if the app doesn't open)";
+    const opening = reused ? "Switched to your open WhatsApp Web tab" : mode === "web" ? "WhatsApp Web is opening" : mode === "app" ? "The WhatsApp app is opening" : "WhatsApp is opening (the app, or WhatsApp Web if the app doesn't open)";
     if (links.direct) modal("Send in WhatsApp", `<p class="small">${opening} on the group <b>${esc(g.name)}</b>.</p>${paste}
       <p class="small muted">WhatsApp doesn't let other programs type into a group, so the message is pasted by you.</p>`);
     else modal("Send in WhatsApp", `<p class="small">${opening}.</p><p>Open the group <b>${esc(g.name)}</b>.</p>${paste}
