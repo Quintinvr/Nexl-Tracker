@@ -285,3 +285,4 @@ button.go-cell.mono { font-weight: 500; }
 .grp-for label { display: flex; gap: 6px; align-items: center; }
 #modalBody label.small { display: block; margin-top: 8px; }
 #modalBody label.small input { margin-top: 3px; padding: 5px 6px; }
+.big-step { font-size: 14px; padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, #25d366 14%, var(--bg)); border: 1px solid #25d366; }
