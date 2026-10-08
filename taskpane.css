@@ -280,3 +280,8 @@ button.go-cell.mono { font-weight: 500; }
 .fxtype input { flex: 1; min-width: 0; text-transform: uppercase; padding: 4px 6px; font-size: 14px; }
 .cphoto.zoomable { cursor: zoom-in; }
 .cphoto.zoom { max-height: none; width: 100%; cursor: zoom-out; }
+.drv-group { margin: 6px 0 2px; }
+.grp-for { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.grp-for label { display: flex; gap: 6px; align-items: center; }
+#modalBody label.small { display: block; margin-top: 8px; }
+#modalBody label.small input { margin-top: 3px; padding: 5px 6px; }

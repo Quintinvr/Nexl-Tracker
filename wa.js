@@ -76,7 +76,8 @@
         vessel: get(r, "vessel"), loadRef: loadRef || container, container, seal: get(r, "seal"),
         tare: get(r, "tare"), booking: get(r, "booking"), status, icon, live: !!(live && !live.completed), remark, nexlHint, hasComment: !!comment,
         date: cols.loadDate === undefined ? "" : dateKey(r[cols.loadDate]),
-        instruction: get(r, "instruction"), driver: get(r, "driver"), transporter: get(r, "transporter"), portBooking: portBooking(r),
+        instruction: get(r, "instruction"), driver: get(r, "driver"), transporter: get(r, "transporter") || (d && d.nexl && d.nexl.owner) || "",
+        nexlDriver: (d && d.nexl && d.nexl.driver) || "", portBooking: portBooking(r),
         // Route for the driver message: Nexl's instruction route first, the sheet's depot/packstore/port as fallback.
         route: routeFor(d, { collect: get(r, "emptyDepot"), packing: get(r, "packstore"), dropoff: get(r, "port") }),
       });
@@ -136,11 +137,27 @@
       const d = rowsMap ? rowsMap[`${tab}|${row}`] : null;
       out.push({
         id: `${tab}|${row}`, row, tab, client: get(values, "customer"), loadRef: get(values, "loadRef") || container || instruction, container,
-        booking: get(values, "booking"), portBooking: portBooking(values), instruction, driver: get(values, "driver"), date: cols.loadDate === undefined ? "" : dateKey(values[cols.loadDate]),
+        booking: get(values, "booking"), portBooking: portBooking(values), instruction, driver: get(values, "driver"),
+        transporter: get(values, "transporter") || (d && d.nexl && d.nexl.owner) || "", nexlDriver: (d && d.nexl && d.nexl.driver) || "", date: cols.loadDate === undefined ? "" : dateKey(values[cols.loadDate]),
         route: routeFor(d, { collect: get(values, fallback.collect), packing: get(values, fallback.packing), dropoff: get(values, fallback.dropoff) }),
       });
     }
     return out;
+  }
+
+  // Driver WhatsApp groups (one per driver, or one per transporter/owner): key "DRIVER|NAME" or "OWNER|NAME".
+  const groupKey = (kind, name) => (clean(name) ? `${kind}|${clean(name).toUpperCase()}` : "");
+  function groupFor(load, groups) {
+    if (!load || !groups) return null;
+    for (const k of [groupKey("DRIVER", load.driver), groupKey("DRIVER", load.nexlDriver), groupKey("OWNER", load.transporter)])
+      if (k && groups[k] && groups[k].name) return Object.assign({ key: k }, groups[k]);
+    return null;
+  }
+  /** Link that opens WhatsApp with the message typed in: straight into the group if we have its invite link. */
+  const INVITE = /^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]{10,}/;
+  function sendLink(text, group) {
+    if (group && INVITE.test(group.link || "")) return { url: group.link.trim(), direct: true };
+    return { url: "https://wa.me/?text=" + encodeURIComponent(text), direct: false };
   }
 
   function byClient(loads) {
@@ -196,5 +213,5 @@
     return out.join("\n");
   }
 
-  root.NexlWhatsApp = { portBooking, driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
+  root.NexlWhatsApp = { groupKey, groupFor, sendLink, INVITE, portBooking, driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
 })(typeof window !== "undefined" ? window : globalThis);
