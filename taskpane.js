@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.3.0";
+  const VERSION = "2.3.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -939,44 +939,27 @@
     $("grSave").onclick = () => save(false);
     if ($("grDel")) $("grDel").onclick = () => save(true);
   }
-  // Try the WhatsApp desktop app (whatsapp:// link). If this window doesn't lose focus within a few seconds,
-  // the app didn't open (not installed / not allowed) -> use WhatsApp Web instead.
-  function launchApp(url, waitMs = 2500) {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = (ok) => { if (done) return; done = true; window.removeEventListener("blur", onAway); document.removeEventListener("visibilitychange", onAway); resolve(ok); };
-      const onAway = () => finish(true);
-      window.addEventListener("blur", onAway);
-      document.addEventListener("visibilitychange", onAway);
-      const a = document.createElement("a");
-      a.href = url; a.style.display = "none"; a.rel = "noopener";
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => finish(false), waitMs);
-    });
-  }
   async function sendToGroup() {
     const src = driverSource(), l = src.loads.find((x) => x.id === state.waDrvSel);
     if (!l) return;
     const text = $("waDrvMsg").value, g = NexlWhatsApp.groupFor(l, state.groups);
     if (!g) { editGroup(l); return; }
-    await copyText(text, null); // first: the clipboard only works while this window has focus
+    await copyText(text, null); // first: the clipboard only works while this panel has focus
     const links = NexlWhatsApp.sendLink(text, g);
     const mode = settings.waOpen || "auto";
-    let where = "web";
-    if (mode !== "web") {
-      if (mode === "auto") toast("Opening the WhatsApp app…");
-      const opened = await launchApp(links.app, mode === "app" ? 0 : 2500);
-      if (opened || mode === "app") where = "app";
-    }
-    if (where === "web") window.open(links.web, "nexl-whatsapp");
-    const app = where === "app" ? "The WhatsApp app" : "WhatsApp Web";
+    // Opened in its own tab (open-wa.html): it tries the WhatsApp app and falls back to WhatsApp Web there.
+    // Nothing is opened inside the Excel panel itself (WhatsApp pages refuse to load inside Excel).
+    const helper = new URL("open-wa.html", location.href);
+    helper.search = "";
+    helper.hash = new URLSearchParams({ app: links.app, web: links.web, mode }).toString();
+    const w = window.open(helper.toString(), "nexl-whatsapp");
+    if (!w) { toast("The browser blocked the WhatsApp tab — allow pop-ups for this site, then try again."); }
     const paste = `<p class="big-step">📋 The message is copied.<br>Click in the message box, press <b>Ctrl+V</b>, then <b>Enter</b>.</p>`;
-    if (links.direct) modal("Send in WhatsApp", `<p class="small">${app} is opening the group <b>${esc(g.name)}</b>.</p>${paste}
+    const opening = mode === "web" ? "WhatsApp Web is opening" : mode === "app" ? "The WhatsApp app is opening" : "WhatsApp is opening (the app, or WhatsApp Web if the app doesn't open)";
+    if (links.direct) modal("Send in WhatsApp", `<p class="small">${opening} on the group <b>${esc(g.name)}</b>.</p>${paste}
       <p class="small muted">WhatsApp doesn't let other programs type into a group, so the message is pasted by you.</p>`);
-    else if (where === "app") modal("Send in WhatsApp", `<p class="small">The WhatsApp app is opening with the message typed in.</p>
-      <p>Pick the group <b>${esc(g.name)}</b>, then press send.</p>`);
-    else modal("Send in WhatsApp", `<p class="small">WhatsApp Web is opening.</p><p>Open the group <b>${esc(g.name)}</b>.</p>${paste}
-      <p class="small muted">Tip: add the group's invite link (✎ change) and it opens the group straight away next time.</p>`);
+    else modal("Send in WhatsApp", `<p class="small">${opening}.</p><p>Open the group <b>${esc(g.name)}</b>.</p>${paste}
+      <p class="small muted">In the app the message may already be typed in — then just pick the group and send. Tip: add the group's invite link (✎ change) and it opens the group straight away.</p>`);
   }
 
   // Bring the driver message (at the top of the tab) into view and flash it.

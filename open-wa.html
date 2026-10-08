@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening WhatsApp…</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f5f6f7; --fg: #1c1e21; --muted: #667; --card: #fff; --accent: #128c7e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111b21; --fg: #e9edef; --muted: #8696a0; --card: #202c33; } }
+  body { margin: 0; font: 15px/1.45 "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); display: grid; place-items: center; min-height: 100vh; }
+  .card { background: var(--card); border-radius: 12px; padding: 24px 28px; max-width: 420px; margin: 16px; box-shadow: 0 6px 30px rgba(0,0,0,.12); text-align: center; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  p { margin: 6px 0; color: var(--muted); }
+  .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  button { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="h">Opening the WhatsApp app…</h1>
+  <p id="p">If the app doesn't open in a few seconds, WhatsApp Web opens here instead.</p>
+  <div class="btns"><button id="bApp" type="button">Try the app again</button><button id="bWeb" class="primary" type="button">Use WhatsApp Web</button></div>
+</div>
+<script>
+// Nexl Check: opens the WhatsApp desktop app (whatsapp:// link); if the app doesn't take over, falls back to WhatsApp Web
+// in this same tab. Runs as its own page (not inside Excel), so nothing in the Excel panel can be blocked.
+(function () {
+  "use strict";
+  const q = new URLSearchParams(location.hash.slice(1));
+  const app = q.get("app") || "", web = q.get("web") || "https://web.whatsapp.com/", mode = q.get("mode") || "auto";
+  const safe = (u, re) => (re.test(u) ? u : "");
+  const appUrl = safe(app, /^whatsapp:\/\//), webUrl = safe(web, /^https:\/\/web\.whatsapp\.com\//) || "https://web.whatsapp.com/";
+  let left = false, timer = null;
+  const goWeb = () => { clearTimeout(timer); location.replace(webUrl); };
+  const tryApp = () => {
+    if (!appUrl) return goWeb();
+    left = false;
+    const a = document.createElement("a"); a.href = appUrl; document.body.appendChild(a); a.click(); a.remove();
+    if (mode === "app") { document.getElementById("p").textContent = "Allow the browser to open WhatsApp if it asks."; return; }
+    timer = setTimeout(() => { if (!left && !document.hidden) goWeb(); }, 4000);
+  };
+  const away = () => {
+    if (left) return;
+    left = true; clearTimeout(timer);
+    document.getElementById("h").textContent = "WhatsApp app opened ✓";
+    document.getElementById("p").textContent = "Paste the message there (Ctrl+V, Enter). This tab is reused next time — or click below if the app didn't open.";
+  };
+  window.addEventListener("blur", away);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) away(); });
+  document.getElementById("bApp").onclick = tryApp;
+  document.getElementById("bWeb").onclick = goWeb;
+  if (mode === "web") goWeb(); else tryApp();
+})();
+</script>
+</body>
+</html>
