@@ -76,6 +76,33 @@
       .filter(Boolean);
   }
 
+  /** Planning board: planned instructions with their LOAD REF (row tooltip) and the refs in "Booking / Ref". */
+  function parsePlanning(html) {
+    const t = firstTable(html, ["INSTRUCTION", "CUSTOMER"]);
+    if (!t) return null;
+    return t.rows.map((r) => {
+      const id = normInstr(r["INSTRUCTION"]);
+      if (!id) return null;
+      const title = (r.__tr && (r.__tr.getAttribute ? r.__tr.getAttribute("title") : r.__tr.title)) || "";
+      const refs = [];
+      for (const m of String(title).matchAll(/LOAD REF:\s*([^\n\r]+)/gi)) {
+        const v = m[1].trim();
+        refs.push(v);
+        // "GE3832/33/34/35" -> GE3832, GE3833, GE3834, GE3835
+        const parts = v.replace(/\s+/g, "").split("/");
+        const n = parts.length > 1 ? parts[1].length : 0, tail = (x) => +x.slice(-n);
+        if (n && /^[A-Za-z]*\d{3,}$/.test(parts[0]) && parts.slice(1).every((x, i) => /^\d{1,3}$/.test(x) && x.length === n && +x > tail(i ? parts[i] : parts[0]))) {
+          for (const x of parts.slice(1)) refs.push(parts[0].slice(0, parts[0].length - x.length) + x);
+          refs.push(parts[0]);
+        }
+      }
+      const book = String(r["BOOKING REFERENCE"] || "").split("/").map((x) => x.trim()).filter(Boolean);
+      refs.push(...book.slice(1));
+      return { id, base: baseInstr(id), customer: r["CUSTOMER"] || "", booking: book[0] || "", vessel: r["VESSEL"] || "", startTime: r["START TIME"] || "",
+        loadRefs: [...new Set(refs.filter((x) => x.replace(/[^A-Za-z0-9]/g, "").length >= 4 && !/^TBA$/i.test(x)))] };
+    }).filter(Boolean);
+  }
+
   /** Containers on one instruction (the container table in an instruction's detail view). */
   function parseContainers(html, instrId) {
     const t = firstTable(html, ["CONTAINER", "SEAL"]);
@@ -145,5 +172,5 @@
       .filter((r) => r.instruction && r.container);
   }
 
-  root.NexlParsers = { parseStatusScreen, parseContainers, parseDriverTracking, parseSearch, normInstr, baseInstr, clean };
+  root.NexlParsers = { parseStatusScreen, parsePlanning, parseContainers, parseDriverTracking, parseSearch, normInstr, baseInstr, clean };
 })(typeof window !== "undefined" ? window : globalThis);

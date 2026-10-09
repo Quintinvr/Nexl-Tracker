@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.0";
+  const VERSION = "2.6.1";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -112,6 +112,7 @@
       try { instructions = await NexlClient.getInstructions(settings.region); }
       catch (e) { if (e.code === "NOT_LOGGED_IN") pill("nexlPill", false, "Nexl: log in"); throw e; }
       pill("nexlPill", true, "Nexl");
+      const planning = await NexlClient.getPlanning(settings.region);
       const bases = new Set(instructions.map((i) => i.base));
 
       progress(0.22, "Reading plan tabs…");
@@ -137,7 +138,7 @@
       const containers = await NexlClient.getContainers(ids, (d, n) => progress(0.25 + 0.55 * (d / n), `Reading Nexl containers ${d}/${n}…`));
       progress(0.82, "Reading driver tracking…");
       const tracking = await NexlClient.getTracking();
-      const nexl = { instructions, containers, tracking };
+      const nexl = { instructions, containers, tracking, planning };
 
       let res = NexlMatcher.compare(usable, nexl, matchOpts());
       const unknown = [...new Set(res.issues.filter((i) => i.field === "container" && i.sheet && !i.nexl).map((i) => i.container))].slice(0, 25);
@@ -149,7 +150,7 @@
       // Instruction numbers: look up load refs Nexl hasn't told us about yet (Reference 2), cached on this PC.
       nexl.refSearch = refCacheGet();
       res = NexlMatcher.compare(usable, nexl, matchOpts());
-      const ask = (res.instrLinks ? res.instrLinks.toSearch : []).slice(0, 20);
+      const ask = (res.instrLinks ? res.instrLinks.toSearch : []).slice(0, 40);
       if (ask.length) {
         progress(0.92, `Looking up ${ask.length} load ref(s) in Nexl…`);
         const found = await NexlClient.searchRefs(ask).catch(() => ({}));
@@ -689,12 +690,12 @@
     for (const k of [...state.instrSel]) if (k >= fills.length) state.instrSel.delete(k);
     $("instrFill").innerHTML = fills.length ? fills.map((f, k) => `<div class="fill"><input type="checkbox" data-ik="${k}" ${state.instrSel.has(k) ? "checked" : ""}>
         <span>${go(f)} · load ref <span class="mono">${esc(f.loadRef)}</span> → <b class="mono">${esc(f.value)}</b>
-        <span class="muted">${esc([f.customer, f.vessel].filter(Boolean).join(" · "))}${f.others.length ? ` · also on ${esc(f.others.join(", "))} — check` : ""}</span>
+        <span class="muted">${esc([f.state === "Planned" ? "📝 Planned" : "", f.customer, f.vessel].filter(Boolean).join(" · "))}${f.others.length ? ` · also on ${esc(f.others.join(", "))} — check` : ""}</span>
         <button class="primary xs" data-fillinstr="${k}" type="button">Fill</button></span></div>`).join("")
       : `<p class="empty">No empty instruction cells with a load ref Nexl knows.</p>`;
     $("instrFillActions").hidden = !fills.length;
     const pend = (L.toSearch || []).length;
-    $("instrNote").textContent = NexlClient.refBlocked ? "Update the Nexl Check Bridge extension to 1.5 so load refs can be looked up in Nexl."
+    $("instrNote").textContent = (NexlClient.refBlocked || NexlClient.planBlocked) ? "Update the Nexl Check Bridge extension to 1.5.1 so load refs and planned instructions can be looked up in Nexl."
       : pend ? `${pend} more load ref(s) will be looked up in Nexl on the next syncs.` : "";
     const root = $("view-instr");
     root.querySelectorAll("[data-gotab]").forEach((b) => (b.onclick = () => { const ref = { tab: b.dataset.gotab, row: +b.dataset.gorow, col: b.dataset.gocol }; ExcelIO.goTo(ref).catch(() => {}); }));

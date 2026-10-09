@@ -79,6 +79,13 @@
       .filter((x) => !seen.has(x.id) && seen.add(x.id));
   }
 
+  /** Planned instructions (Planning board). Bridge 1.5.1+; older bridges refuse it -> []. */
+  async function getPlanning(region) {
+    try { return P.parsePlanning(await get(`/php/ajax/statusscreen/get.status.screen.template.php?status_type=planning&p_region=${region}&p_tab_selected=4`)) || []; }
+    catch (e) { if (e.code === "NOT_LOGGED_IN") throw e; if (e.code === "NOT_ALLOWED") planBlocked = true; return []; }
+  }
+  let planBlocked = false;
+
   async function getContainers(ids, onProgress) {
     const out = {};
     let done = 0;
@@ -131,5 +138,5 @@
     return r.dataUrl;
   }
 
-  root.NexlClient = { ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, searchRefs, NexlError, get bridgeVersion() { return bridgeVersion; }, get refBlocked() { return refBlocked; } };
+  root.NexlClient = { getPlanning, get planBlocked() { return planBlocked; }, ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, searchRefs, NexlError, get bridgeVersion() { return bridgeVersion; }, get refBlocked() { return refBlocked; } };
 })(window);

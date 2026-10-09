@@ -117,6 +117,9 @@
         put(c.ref2, { instruction: baseInstr(instr), base: baseInstr(instr), customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
       }
     }
+    // Planned instructions (Planning board) carry the load ref on the instruction itself.
+    for (const p of nexl.planning || []) for (const ref of p.loadRefs || [])
+      put(ref, { instruction: p.base, base: p.base, customer: p.customer || "", vessel: p.vessel || "", state: "Planned" });
     const searched = new Set();
     for (const [ref, hits] of Object.entries(nexl.refSearch || {})) {
       searched.add(refKey(ref));
@@ -145,12 +148,15 @@
       if (!ownRefs.has(b)) ownRefs.set(b, new Set());
       ownRefs.get(b).add(refKey(c.ref2)).add(refHead(c.ref2));
     }
-    const fills = [], mismatches = [], toSearch = new Set();
+    const fills = [], mismatches = [], toSearch = new Map(); // ref -> {blank, row}
+    let curRow = 0, curBlank = false;
+    const ask = (ref) => { const o = toSearch.get(ref); if (!o || (curBlank && !o.blank) || (curBlank === o.blank && curRow > o.row)) toSearch.set(ref, { blank: curBlank, row: curRow }); };
     const consider = (tab, row, instr, loadRef, container, colInstr) => {
       if (!loadRef || refKey(loadRef).length < 4) return;
+      curRow = row; curBlank = !instr;
       const hits = lookup(loadRef);
       if (!instr) {
-        if (!hits.length) { if (!searched.has(refKey(loadRef))) toSearch.add(loadRef); return; }
+        if (!hits.length) { if (!searched.has(refKey(loadRef))) ask(loadRef); return; }
         const b = best(hits);
         fills.push({ tab, row, col: colInstr, field: "instruction", value: b.base, loadRef, customer: b.customer, vessel: b.vessel, state: b.state,
           others: hits.filter((h) => h.base !== b.base).map((h) => h.base) });
@@ -160,13 +166,13 @@
       if (!hits.length) {
         const own = ownRefs.get(sb);
         const suspicious = !instrById.has(sb) || (own && own.size && !own.has(refKey(loadRef)) && !own.has(refHead(loadRef)));
-        if (suspicious && !searched.has(refKey(loadRef))) toSearch.add(loadRef);
+        if (suspicious && !searched.has(refKey(loadRef))) ask(loadRef);
         return;
       }
       if (hits.some((h) => h.base === sb)) return; // matches
       // Only trust a mismatch when Nexl was asked about this ref directly, or the sheet's own instruction was read and doesn't carry it.
       const b = best(hits);
-      if (!searched.has(refKey(loadRef)) && !instrById.has(sb)) { toSearch.add(loadRef); return; }
+      if (!searched.has(refKey(loadRef)) && !instrById.has(sb)) { ask(loadRef); return; }
       mismatches.push({ tab, row, col: colInstr, sheetInstr: instr, nexlInstr: b.base, loadRef, customer: b.customer, vessel: b.vessel, container,
         others: hits.map((h) => h.base) });
     };
@@ -180,7 +186,9 @@
       if (!t.refRows || t.cols.loadRef === undefined) continue;
       for (const x of t.refRows) consider(t.name, x.row, normInstr(x.instr), clean(x.loadRef), clean(x.container), colLetter(t.cols.instruction));
     }
-    return { fills, mismatches, toSearch: [...toSearch] };
+    // Look up empty instruction cells first, newest (lowest on the sheet) first; then the rest, newest first.
+    const order = [...toSearch].sort((a, b) => (b[1].blank - a[1].blank) || (b[1].row - a[1].row)).map((x) => x[0]);
+    return { fills, mismatches, toSearch: order, blankPending: [...toSearch.values()].filter((o) => o.blank).length };
   }
 
   function compare(sheetTabs, nexl, opts = {}) {
