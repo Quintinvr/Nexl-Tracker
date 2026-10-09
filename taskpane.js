@@ -4,14 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.1";
+  const VERSION = "2.6.2";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true, waDrvSheet: "", waDrvFieldsBy: {},
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpen: true, popUp: true, waDrvSheet: "", waDrvFieldsBy: {},
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
@@ -375,6 +375,10 @@
         if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
       });
     }
+  }
+  async function ensureAutoOpen() {
+    if (settings.autoOpen === false) return;
+    try { if (!(await ExcelIO.getAutoOpenFresh())) await ExcelIO.setAutoOpen(true); } catch (e) { /* not available here */ }
   }
   // Load ref -> Nexl instruction lookups, remembered on this PC: found ones for 7 days, "not in Nexl yet" for 30 min.
   const REF_KEY = "nexlcheck.refs.v1";
@@ -1161,8 +1165,9 @@
     bind("sRegion", "region", "value");
     bind("sCutoffH", "cutoffH", "value", (v) => Math.max(2, Math.min(72, +v || CFG.cutoffWarnHours)));
     $("sTabName").textContent = CFG.checkTabName;
-    $("sAutoOpen").checked = ExcelIO.getAutoOpen();
+    $("sAutoOpen").checked = settings.autoOpen !== false;
     $("sAutoOpen").addEventListener("change", async () => {
+      settings.autoOpen = $("sAutoOpen").checked; saveSettings();
       const ok = await ExcelIO.setAutoOpen($("sAutoOpen").checked);
       toast(ok ? ($("sAutoOpen").checked ? "Nexl Check will open with this workbook." : "Auto-open switched off.") : "Couldn't change auto-open.");
     });
@@ -1224,11 +1229,10 @@
       target.scrollIntoView({ behavior: "smooth" });
     }));
 
-    // Auto-open: switch it on once, the first time this user opens the panel (they can turn it off in Settings).
-    if (!settings.autoOpenSet) {
-      settings.autoOpenSet = true; saveSettings();
-      if (!ExcelIO.getAutoOpen()) { await ExcelIO.setAutoOpen(true); $("sAutoOpen").checked = true; }
-    }
+    // Auto-open: on unless this user switched it off in Settings. The flag lives in the workbook and can get
+    // dropped (another person's Excel, a re-uploaded/copied file), so put it back on every start and every hour.
+    await ensureAutoOpen();
+    setInterval(ensureAutoOpen, 60 * 60000);
 
     const p = await NexlClient.ping();
     pill("bridgePill", p.ok, p.ok ? "Bridge" : "Bridge missing");

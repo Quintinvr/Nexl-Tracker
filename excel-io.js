@@ -425,6 +425,12 @@
   function getAutoOpen() {
     try { return !!Office.context.document.settings.get("Office.AutoShowTaskpaneWithDocument"); } catch (e) { return false; }
   }
+  /** Re-reads the workbook's add-in settings first (another person or panel may have saved them since). */
+  function getAutoOpenFresh() {
+    return new Promise((resolve) => {
+      try { Office.context.document.settings.refreshAsync(() => resolve(getAutoOpen())); } catch (e) { resolve(getAutoOpen()); }
+    });
+  }
   function setAutoOpen(on) {
     return new Promise((resolve) => {
       try {
@@ -470,5 +476,5 @@
 
   LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, getAutoOpenFresh, setAutoOpen, readExtras, readTabValues };
 })(window);
