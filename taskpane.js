@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.5.0";
+  const VERSION = "2.6.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -144,6 +144,17 @@
       if (unknown.length) {
         progress(0.9, `Searching Nexl for ${unknown.length} unknown container(s)…`);
         nexl.search = await NexlClient.searchContainers(unknown);
+        res = NexlMatcher.compare(usable, nexl, matchOpts());
+      }
+      // Instruction numbers: look up load refs Nexl hasn't told us about yet (Reference 2), cached on this PC.
+      nexl.refSearch = refCacheGet();
+      res = NexlMatcher.compare(usable, nexl, matchOpts());
+      const ask = (res.instrLinks ? res.instrLinks.toSearch : []).slice(0, 20);
+      if (ask.length) {
+        progress(0.92, `Looking up ${ask.length} load ref(s) in Nexl…`);
+        const found = await NexlClient.searchRefs(ask).catch(() => ({}));
+        refCachePut(found);
+        nexl.refSearch = refCacheGet();
         res = NexlMatcher.compare(usable, nexl, matchOpts());
       }
       state.input = { usable, nexl };
@@ -363,6 +374,21 @@
         if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
       });
     }
+  }
+  // Load ref -> Nexl instruction lookups, remembered on this PC: found ones for 7 days, "not in Nexl yet" for 30 min.
+  const REF_KEY = "nexlcheck.refs.v1";
+  function refCacheRaw() { try { return JSON.parse(localStorage.getItem(REF_KEY) || "{}"); } catch (e) { return {}; } }
+  function refCacheGet() {
+    const now = Date.now(), out = {};
+    for (const [k, v] of Object.entries(refCacheRaw())) if (v && now - v.at < (v.hits.length ? 7 * 864e5 : 30 * 60000)) out[k] = v.hits;
+    return out;
+  }
+  function refCachePut(found) {
+    const c = refCacheRaw(), now = Date.now();
+    for (const [k, hits] of Object.entries(found || {})) c[k] = { at: now, hits: (hits || []).map((h) => ({ instruction: h.instruction, customer: h.customer, vessel: h.vessel, booking: h.booking, status: h.status })) };
+    const keys = Object.keys(c);
+    if (keys.length > 3000) keys.sort((a, b) => c[a].at - c[b].at).slice(0, keys.length - 3000).forEach((k) => delete c[k]);
+    try { localStorage.setItem(REF_KEY, JSON.stringify(c)); } catch (e) { /* storage off: look up again next time */ }
   }
   // Leg times remembered on this PC (last 300 stop-to-stop times) so "Will it make the vessel?" learns your routes.
   const LEG_KEY = "nexlcheck.legs.v1";
@@ -638,8 +664,59 @@
     renderNow();
     renderIssues();
     renderLive();
+    renderInstr();
     renderWhatsApp();
     if (state.selected) showDetail(state.selected.tab, state.selected.row, true);
+  }
+
+  // ---------- Instruction tab: instruction numbers via LOAD REF = Nexl Reference 2 ----------
+  state.instrSel = state.instrSel || new Set();
+  function renderInstr() {
+    const L = (state.result && state.result.instrLinks) || { fills: [], mismatches: [] };
+    const fills = L.fills, bad = L.mismatches;
+    const t = $("nInstrTab");
+    if (t) { t.hidden = !(fills.length + bad.length); t.textContent = bad.length ? `${bad.length}!` : fills.length; t.classList.toggle("bad", !!bad.length); }
+    $("nInstrBad").textContent = bad.length || "";
+    $("nInstrFill").textContent = fills.length || "";
+    const go = (x) => `<button class="link go-cell" data-gotab="${esc(x.tab)}" data-gorow="${x.row}" data-gocol="${esc(x.col)}" type="button" title="Go to the cell">📍 ${esc(x.tab)} ${esc(x.col + x.row)}</button>`;
+    $("instrBad").innerHTML = bad.length ? bad.map((m, k) => `<div class="card error">
+        <div class="where">${go(m)}<span>${m.issue && m.issue.ack ? (m.issue.bypass ? "✔ bypassed" : "👀 on it") : ""}</span></div>
+        <div class="what">Load ref <b class="mono">${esc(m.loadRef)}</b> is on Nexl <b class="mono">${esc(m.nexlInstr)}</b>${m.customer ? ` · ${esc(m.customer)}` : ""}${m.vessel ? ` · ${esc(m.vessel)}` : ""}</div>
+        <dl class="vals"><dt>Sheet</dt><dd class="mono">${esc(m.sheetInstr)}</dd><dt>Nexl</dt><dd class="mono">${esc(m.nexlInstr)}${m.others.length > 1 ? ` <span class="muted small">(also ${esc(m.others.filter((o) => o !== m.nexlInstr).join(", "))})</span>` : ""}</dd></dl>
+        <div class="card-actions"><button class="primary xs" data-fixinstr="${k}" type="button">Put ${esc(m.nexlInstr)} in the sheet</button>
+          <button class="ghost xs" data-nexlinstr="${esc(m.nexlInstr)}" type="button">Nexl ↗</button></div></div>`).join("")
+      : `<p class="empty">Every instruction with a load ref matches Nexl. ✓</p>`;
+    for (const k of [...state.instrSel]) if (k >= fills.length) state.instrSel.delete(k);
+    $("instrFill").innerHTML = fills.length ? fills.map((f, k) => `<div class="fill"><input type="checkbox" data-ik="${k}" ${state.instrSel.has(k) ? "checked" : ""}>
+        <span>${go(f)} · load ref <span class="mono">${esc(f.loadRef)}</span> → <b class="mono">${esc(f.value)}</b>
+        <span class="muted">${esc([f.customer, f.vessel].filter(Boolean).join(" · "))}${f.others.length ? ` · also on ${esc(f.others.join(", "))} — check` : ""}</span>
+        <button class="primary xs" data-fillinstr="${k}" type="button">Fill</button></span></div>`).join("")
+      : `<p class="empty">No empty instruction cells with a load ref Nexl knows.</p>`;
+    $("instrFillActions").hidden = !fills.length;
+    const pend = (L.toSearch || []).length;
+    $("instrNote").textContent = NexlClient.refBlocked ? "Update the Nexl Check Bridge extension to 1.5 so load refs can be looked up in Nexl."
+      : pend ? `${pend} more load ref(s) will be looked up in Nexl on the next syncs.` : "";
+    const root = $("view-instr");
+    root.querySelectorAll("[data-gotab]").forEach((b) => (b.onclick = () => { const ref = { tab: b.dataset.gotab, row: +b.dataset.gorow, col: b.dataset.gocol }; ExcelIO.goTo(ref).catch(() => {}); }));
+    root.querySelectorAll("[data-ik]").forEach((cb) => (cb.onchange = () => { const k = +cb.dataset.ik; cb.checked ? state.instrSel.add(k) : state.instrSel.delete(k); }));
+    root.querySelectorAll("[data-fillinstr]").forEach((b) => (b.onclick = () => fillInstr([fills[+b.dataset.fillinstr]])));
+    root.querySelectorAll("[data-nexlinstr]").forEach((b) => (b.onclick = () => openNexl(b.dataset.nexlinstr, "instruction", b.dataset.nexlinstr)));
+    root.querySelectorAll("[data-fixinstr]").forEach((b) => (b.onclick = async () => {
+      const m = bad[+b.dataset.fixinstr];
+      const ok = await ExcelIO.replaceCell({ tab: m.tab, row: m.row, col: m.col, value: Number(m.nexlInstr) || m.nexlInstr }, m.sheetInstr).catch(() => false);
+      toast(ok ? `${m.tab} ${m.col}${m.row} changed to ${m.nexlInstr}.` : "The cell changed since the last sync — not overwritten. Sync and try again.");
+      if (ok) setTimeout(sync, 400);
+    }));
+  }
+  async function fillInstr(list) {
+    list = list.filter(Boolean);
+    if (!list.length) return;
+    try {
+      const r = await ExcelIO.fillBlanks(list.map((f) => ({ ...f, value: Number(f.value) || f.value })));
+      toast(`Filled ${r.filled} instruction number(s)${r.skipped ? `, skipped ${r.skipped} that already had a value` : ""}.`);
+      state.instrSel.clear();
+      setTimeout(sync, 400);
+    } catch (e) { toast("Couldn't fill: " + e.message); }
   }
 
   const ackTag = (i) => (i.bypass ? "✔ " : "👀 ") + esc(i.ack.by) + (/^INSTR\|/.test(i.ack.key || "") ? " (whole instr.)" : "");
@@ -1057,7 +1134,7 @@
       ExcelIO.readTabValues(CFG.whatsAppTab).then((g) => { state.waGrid = g; if (state.view === "wa") renderWhatsApp(); }).catch(() => {});
     }
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
-    for (const id of ["now", "issues", "live", "wa", "settings"]) $("view-" + id).hidden = id !== v;
+    for (const id of ["now", "issues", "live", "instr", "wa", "settings"]) $("view-" + id).hidden = id !== v;
     $("detail").classList.toggle("off", v === "wa" || v === "settings");
   }
 
@@ -1117,6 +1194,8 @@
     $("fTab").addEventListener("change", renderIssues);
     $("liveSearch").addEventListener("input", renderLive);
     $("showDone").addEventListener("change", renderLive);
+    $("instrFillAll").addEventListener("click", () => { ((state.result && state.result.instrLinks) || { fills: [] }).fills.forEach((f, k) => state.instrSel.add(k)); renderInstr(); });
+    $("instrFillSel").addEventListener("click", () => { const f = ((state.result && state.result.instrLinks) || { fills: [] }).fills; fillInstr([...state.instrSel].map((k) => f[k])); });
     $("fillAll").addEventListener("click", () => { (state.result ? state.result.fills : []).forEach((f, k) => fillAllowed(f) && state.fillSel.add(k)); renderFills(); });
     $("fillSel").addEventListener("click", () => doFill([...state.fillSel].map((k) => state.result.fills[k]).filter(Boolean)));
     $("hideBtn").addEventListener("click", hidePanel);

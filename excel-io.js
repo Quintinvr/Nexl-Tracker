@@ -35,16 +35,26 @@
         const first = cfg.headerRow; // 0-based index of first data row
         const nCols = Math.min(cfg.maxColumns, Math.max(used.columnIndex + used.columnCount, 1));
 
-        // 1) Instruction column only, in chunks.
+        // 1) Instruction column only, in chunks (+ LOAD REF / CONTAINER on tabs that have a load ref, for
+        //    linking rows to their Nexl instruction through Reference 2).
         const wanted = [];
+        const refRows = [];
+        const hasRef = cols.loadRef !== undefined;
         for (let r = first; r < lastRow; r += 5000) {
           const n = Math.min(5000, lastRow - r);
           const rng = ws.getRangeByIndexes(r, cols.instruction, n, 1);
           rng.load("values");
+          const refRng = hasRef ? ws.getRangeByIndexes(r, cols.loadRef, n, 1) : null;
+          const conRng = hasRef ? ws.getRangeByIndexes(r, cols.container, n, 1) : null;
+          if (refRng) { refRng.load("values"); conRng.load("values"); }
           await ctx.sync();
           rng.values.forEach((v, i) => {
             const id = P.normInstr(v[0]);
             if (id && bases.has(P.baseInstr(id))) wanted.push(r + i);
+            else if (refRng) {
+              const lr = String(refRng.values[i][0] == null ? "" : refRng.values[i][0]).trim();
+              if (lr && lr.replace(/[^A-Za-z0-9]/g, "").length >= 4) refRows.push({ row: r + i + 1, instr: v[0], loadRef: lr, container: conRng.values[i][0] });
+            }
           });
         }
         // 2) Full rows, as contiguous blocks.
@@ -57,7 +67,7 @@
         if (loaded.length) await ctx.sync();
         const rows = [];
         for (const { b, rng } of loaded) rng.values.forEach((vals, i) => rows.push({ row: b.start + i + 1, values: vals }));
-        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, planned: !!tab.planned, cols, rows });
+        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, planned: !!tab.planned, cols, rows, refRows });
       }
       return out;
     });

@@ -93,6 +93,96 @@
    * @param sheetTabs [{name, compare:[field], cols:{field: index}, rows:[{row, values:[]}]}]
    * @param nexl {instructions:[instr], containers:{id:[c]}, tracking:[t]}
    */
+  /** Load ref / Reference 2 as a lookup key ("SM266662", "X762/01", "FHR261882/HQ,XB" -> FHR261882 as a fallback). */
+  const refKey = (v) => compact(v);
+  const refHead = (v) => compact(String(v || "").split(/[\/,\s]+/)[0]);
+  /**
+   * Which Nexl instruction carries each load ref. Sources: Reference 2 on the containers of the instructions
+   * already read, plus Nexl's reference search (nexl.refSearch: {loadRef: [{instruction, customer, vessel, booking, status}]}).
+   * Returns { fills, mismatches, toSearch }.
+   */
+  function linkInstructions(sheetTabs, nexl, rowRecs, instrById) {
+    const map = new Map(); // refKey -> Map(base -> {instruction, base, customer, vessel, state})
+    const put = (ref, info) => {
+      const k = refKey(ref);
+      if (k.length < 4) return;
+      if (!map.has(k)) map.set(k, new Map());
+      const m = map.get(k);
+      if (!m.has(info.base)) m.set(info.base, info);
+    };
+    for (const [id, list] of Object.entries(nexl.containers || {})) {
+      for (const c of list || []) {
+        if (!c.ref2) continue;
+        const instr = c.instruction || id, i = instrById.get(instr) || instrById.get(baseInstr(instr)) || {};
+        put(c.ref2, { instruction: baseInstr(instr), base: baseInstr(instr), customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
+      }
+    }
+    const searched = new Set();
+    for (const [ref, hits] of Object.entries(nexl.refSearch || {})) {
+      searched.add(refKey(ref));
+      for (const h of hits || []) {
+        if (!h.instruction) continue;
+        const b = baseInstr(h.instruction), i = instrById.get(b) || {};
+        put(ref, { instruction: b, base: b, customer: h.customer || i.customer || "", vessel: h.vessel || i.vessel || "", state: i.state || h.status || "", booking: h.booking || "" });
+      }
+    }
+    const lookup = (loadRef) => {
+      const k = refKey(loadRef);
+      let m = map.get(k);
+      if (!m) { // "FHR261882" on the sheet vs "FHR261882/HQ,XB" in Nexl
+        for (const [kk, mm] of map) if (refHead(kk) === k && k.length >= 6) { m = mm; break; }
+      }
+      return m ? [...m.values()] : [];
+    };
+    // Prefer an instruction Nexl lists as current (active / recently completed), then the newest number.
+    const best = (hits) => [...hits].sort((a, b) => (!!instrById.get(b.base) - !!instrById.get(a.base)) || (parseFloat(b.base) - parseFloat(a.base)))[0];
+
+    // Reference 2 values on each instruction we read (to notice a load ref its own instruction doesn't carry)
+    const ownRefs = new Map();
+    for (const [id, list] of Object.entries(nexl.containers || {})) for (const c of list || []) {
+      if (!c.ref2) continue;
+      const b = baseInstr(c.instruction || id);
+      if (!ownRefs.has(b)) ownRefs.set(b, new Set());
+      ownRefs.get(b).add(refKey(c.ref2)).add(refHead(c.ref2));
+    }
+    const fills = [], mismatches = [], toSearch = new Set();
+    const consider = (tab, row, instr, loadRef, container, colInstr) => {
+      if (!loadRef || refKey(loadRef).length < 4) return;
+      const hits = lookup(loadRef);
+      if (!instr) {
+        if (!hits.length) { if (!searched.has(refKey(loadRef))) toSearch.add(loadRef); return; }
+        const b = best(hits);
+        fills.push({ tab, row, col: colInstr, field: "instruction", value: b.base, loadRef, customer: b.customer, vessel: b.vessel, state: b.state,
+          others: hits.filter((h) => h.base !== b.base).map((h) => h.base) });
+        return;
+      }
+      const sb = baseInstr(instr);
+      if (!hits.length) {
+        const own = ownRefs.get(sb);
+        const suspicious = !instrById.has(sb) || (own && own.size && !own.has(refKey(loadRef)) && !own.has(refHead(loadRef)));
+        if (suspicious && !searched.has(refKey(loadRef))) toSearch.add(loadRef);
+        return;
+      }
+      if (hits.some((h) => h.base === sb)) return; // matches
+      // Only trust a mismatch when Nexl was asked about this ref directly, or the sheet's own instruction was read and doesn't carry it.
+      const b = best(hits);
+      if (!searched.has(refKey(loadRef)) && !instrById.has(sb)) { toSearch.add(loadRef); return; }
+      mismatches.push({ tab, row, col: colInstr, sheetInstr: instr, nexlInstr: b.base, loadRef, customer: b.customer, vessel: b.vessel, container,
+        others: hits.map((h) => h.base) });
+    };
+    // Rows the matcher already reads (instruction in Nexl's current lists)
+    for (const r of rowRecs) {
+      if (r.cols.loadRef === undefined) continue;
+      consider(r.tab, r.row, r.id, clean(r.vals[r.cols.loadRef]), r.container, colLetter(r.cols.instruction));
+    }
+    // Other rows with a load ref: empty instruction, or an instruction Nexl doesn't list as current
+    for (const t of sheetTabs) {
+      if (!t.refRows || t.cols.loadRef === undefined) continue;
+      for (const x of t.refRows) consider(t.name, x.row, normInstr(x.instr), clean(x.loadRef), clean(x.container), colLetter(t.cols.instruction));
+    }
+    return { fills, mismatches, toSearch: [...toSearch] };
+  }
+
   function compare(sheetTabs, nexl, opts = {}) {
     const now = opts.now ? new Date(opts.now) : new Date();
     const notStartedMin = opts.notStartedMinutes ?? 30;
@@ -256,6 +346,21 @@
         const real = entry.issues.slice(before).some((i) => i.severity !== "info");
         if (real) stats.mismatched++; else stats.matched++;
       }
+    }
+
+    // ---------- Instruction numbers, linked through the LOAD REF (= Reference 2 on Nexl) ----------
+    // Empty instruction cell + load ref known in Nexl  -> offered as an auto-fill (no alert).
+    // Instruction on the sheet that isn't the one Nexl has for that load ref -> error.
+    const instrLinks = linkInstructions(sheetTabs, nexl, rowRecs, instrById);
+    for (const m of instrLinks.mismatches) {
+      const iss = { severity: "error", field: "instruction", code: "loadref", sheet: m.sheetInstr, nexl: m.nexlInstr,
+        message: `Load ref ${m.loadRef} is on Nexl instruction ${m.nexlInstr}${m.customer ? ` (${m.customer})` : ""}, the sheet says ${m.sheetInstr}`,
+        short: `⛔ Instr ≠ Nexl ${m.nexlInstr}`,
+        instruction: m.sheetInstr, container: m.container || m.loadRef, ref: { tab: m.tab, row: m.row, col: m.col } };
+      m.issue = iss;
+      issues.push(iss);
+      const rec = rowRecs.find((r) => r.tab === m.tab && r.row === m.row);
+      if (rec && rec.entry) rec.entry.issues.push(iss);
     }
 
     // Containers Nexl has that no checked tab lists.
@@ -442,7 +547,7 @@
     const order = { error: 0, warn: 1, info: 2 };
     issues.sort((a, b) => order[a.severity] - order[b.severity] || String(a.instruction).localeCompare(String(b.instruction)));
     const groupList = [...groups.values()].map((g) => ({ ...g, tabs: [...g.tabs] })).sort((a, b) => b.base.localeCompare(a.base));
-    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows, cutoffs: cutoffSummary(rowRecs, X, rows), slipCandidates, legMin: X.legMin, legSamples: legSamples(nexl.tracking || []) };
+    return { issues, groups: groupList, notOnPlan, stats, rowStatus, fills, rows, instrLinks, cutoffs: cutoffSummary(rowRecs, X, rows), slipCandidates, legMin: X.legMin, legSamples: legSamples(nexl.tracking || []) };
   }
 
   const FIELD_SHORT = { seal: "Seal", booking: "Booking ref", loadRef: "Load ref", vessel: "Vessel", customer: "Customer", transporter: "Transporter", driver: "Driver" };
@@ -808,5 +913,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
+  root.NexlMatcher = { compare, linkInstructions, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);

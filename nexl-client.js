@@ -106,6 +106,19 @@
     return out;
   }
 
+  /** Nexl's reference search (booking / Reference 2 / 3) for load refs -> {ref: [{instruction, customer, vessel, booking, status}]} */
+  async function searchRefs(list) {
+    const out = {};
+    await pool(list, 3, async (ref) => {
+      const word = String(ref).trim();
+      if (word.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
+      try { out[ref] = (P.parseSearch(await get(`/php/ajax/search/get.search.php?p_filter=reference&p_word=${encodeURIComponent(word)}`)) || []).filter((x) => x.instruction && !/deleted/i.test(x.status || "")); }
+      catch (e) { if (e.code === "NOT_LOGGED_IN") throw e; if (e.code === "NOT_ALLOWED") refBlocked = true; }
+    });
+    return out;
+  }
+  let refBlocked = false;
+
   /** Upload Viewer HTML for one container row (lists the driver's photos). */
   function getUploads(rowId) {
     if (!/^\d+$/.test(String(rowId))) return Promise.reject(new NexlError("NO_ROW", "No Nexl row id for this container"));
@@ -118,5 +131,5 @@
     return r.dataUrl;
   }
 
-  root.NexlClient = { ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
+  root.NexlClient = { ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, searchRefs, NexlError, get bridgeVersion() { return bridgeVersion; }, get refBlocked() { return refBlocked; } };
 })(window);

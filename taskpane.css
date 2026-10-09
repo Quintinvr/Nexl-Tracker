@@ -282,3 +282,7 @@ button.go-cell.mono { font-weight: 500; }
 .cphoto.zoom { max-height: none; width: 100%; cursor: zoom-out; }
 #modalBody label.small { display: block; margin-top: 8px; }
 #modalBody label.small input { margin-top: 3px; padding: 5px 6px; }
+.tabcount { display: inline-block; min-width: 14px; padding: 0 4px; margin-left: 2px; border-radius: 8px; font-size: 10px; line-height: 14px; background: var(--accent); color: #fff; }
+.tabcount.bad { background: #d9534f; }
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }

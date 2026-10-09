@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=2.5.0">
+  <link rel="stylesheet" href="taskpane.css?v=2.6.0">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -64,6 +64,7 @@
     <button role="tab" data-view="now" class="active">Now</button>
     <button role="tab" data-view="issues">Issues</button>
     <button role="tab" data-view="live">Jobs</button>
+    <button role="tab" data-view="instr">Instruction <span id="nInstrTab" class="tabcount" hidden></span></button>
     <button role="tab" data-view="wa">WhatsApp</button>
     <button role="tab" data-view="settings">Settings</button>
   </nav>
@@ -123,6 +124,17 @@
         <summary>Nexl instructions not on the checked tabs <span id="nopCount"></span></summary>
         <div id="nopList"></div>
       </details>
+    </section>
+
+    <section id="view-instr" class="view" hidden>
+      <p class="muted small">Instruction numbers found through the <b>LOAD REF</b> (Reference 2 on Nexl). Empty instruction cells are never an alert: they're listed here to fill in. Only an instruction that doesn't match Nexl is flagged.</p>
+      <h3 class="sec">Doesn't match Nexl <span id="nInstrBad" class="count"></span></h3>
+      <div id="instrBad" class="list"></div>
+      <h3 class="sec">Can be filled in <span id="nInstrFill" class="count"></span></h3>
+      <div id="instrFill" class="filllist"></div>
+      <div class="row-actions" id="instrFillActions" hidden><button id="instrFillSel" class="primary small-btn" type="button">Fill selected</button>
+        <button id="instrFillAll" class="ghost small-btn" type="button">Select all</button></div>
+      <p class="muted small" id="instrNote"></p>
     </section>
 
     <section id="view-wa" class="view" hidden>
@@ -207,14 +219,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=2.5.0"></script>
-  <script src="nexl-parsers.js?v=2.5.0"></script>
-  <script src="matcher.js?v=2.5.0"></script>
-  <script src="nexl-client.js?v=2.5.0"></script>
-  <script src="wa.js?v=2.5.0"></script>
-  <script src="excel-io.js?v=2.5.0"></script>
+  <script src="config.js?v=2.6.0"></script>
+  <script src="nexl-parsers.js?v=2.6.0"></script>
+  <script src="matcher.js?v=2.6.0"></script>
+  <script src="nexl-client.js?v=2.6.0"></script>
+  <script src="wa.js?v=2.6.0"></script>
+  <script src="excel-io.js?v=2.6.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=2.5.0"></script>
-  <script src="taskpane.js?v=2.5.0"></script>
+  <script src="photo-check.js?v=2.6.0"></script>
+  <script src="taskpane.js?v=2.6.0"></script>
 </body>
 </html>
