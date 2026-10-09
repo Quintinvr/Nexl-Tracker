@@ -4,14 +4,14 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.4.0";
+  const VERSION = "2.5.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true, waOpen: "auto", waTag: true, waDrvSheet: "", waDrvFieldsBy: {},
+    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpenSet: false, popUp: true, waDrvSheet: "", waDrvFieldsBy: {},
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
@@ -888,85 +888,10 @@
     if (sel) {
       $("waDrvTitle").textContent = `${sel.loadRef} · ${sel.driver || "no driver on the sheet"}`;
       $("waDrvSrc").textContent = sel.route.source === "nexl" ? `route from Nexl ${sel.instruction}` : "route from the sheet (not found in Nexl)";
-      const tag = settings.waTag ? NexlWhatsApp.phoneFor(sel, state.groups) : "";
-      const key = [sel.id, settings.waEmoji, fl.container, fl.booking, tag].join("|");
-      if (state.waDrvMsgFor !== key) { $("waDrvMsg").value = NexlWhatsApp.driverMessage(sel, { emoji: settings.waEmoji, fields: fl, tag }); state.waDrvMsgFor = key; }
-      const g = NexlWhatsApp.groupFor(sel, state.groups);
-      $("waDrvGroup").innerHTML = g
-        ? `👥 Group: <b>${esc(g.name)}</b> ${g.key.startsWith("OWNER|") ? `<span class="muted">(all ${esc(sel.transporter)} drivers)</span>` : ""} ${g.link ? `<span class="pbadge ok">opens directly</span>` : ""} <button class="link xs" id="waGrpEdit" type="button">✎ change</button>`
-        : `👥 <span class="muted">No WhatsApp group set for ${esc(sel.driver || sel.nexlDriver || "this driver")} yet.</span> <button class="link xs" id="waGrpEdit" type="button">Set group</button>`;
-      $("waDrvGroup").innerHTML += tag ? `<br>🏷 Tags <span class="mono">@${esc(tag)}</span>` : settings.waTag ? `<br><span class="muted">🏷 No WhatsApp number for this driver (✎ to add one and tag them)</span>` : "";
-      $("waGrpEdit").onclick = () => editGroup(sel);
+      const key = [sel.id, settings.waEmoji, fl.container, fl.booking].join("|");
+      if (state.waDrvMsgFor !== key) { $("waDrvMsg").value = NexlWhatsApp.driverMessage(sel, { emoji: settings.waEmoji, fields: fl }); state.waDrvMsgFor = key; }
     }
   }
-  // ---------- Driver WhatsApp groups ----------
-  async function loadGroups() {
-    try { state.groups = await ExcelIO.readGroups(); } catch (e) { state.groups = state.groups || {}; }
-    if (state.view === "wa" && state.waMode === "driver") renderDriver();
-  }
-  function editGroup(l) {
-    const drv = l.driver || l.nexlDriver, own = l.transporter;
-    const cur = NexlWhatsApp.groupFor(l, state.groups);
-    modal("Driver's WhatsApp group", `<p class="small">Driver messages are sent in the driver's group so the owner sees the work. Saved for the whole team.</p>
-      <label class="small">Group name (as it shows in WhatsApp)<input id="grName" class="full" value="${esc(cur ? cur.name : "")}" placeholder="e.g. ${esc(drv || "Driver")} - ${esc(own || "Owner")} jobs"></label>
-      <label class="small">Group invite link <span class="muted">(optional — opens the group directly)</span><input id="grLink" class="full mono" value="${esc(cur ? cur.link : "")}" placeholder="https://chat.whatsapp.com/…"></label>
-      <p class="small muted">Get it in WhatsApp: open the group › group name › Invite via link › Copy link.</p>
-      ${drv ? `<label class="small">${esc(drv)}'s WhatsApp number <span class="muted">(optional — to @tag the driver)</span><input id="grPhone" class="full mono" value="${esc(NexlWhatsApp.phoneFor(l, state.groups))}" placeholder="e.g. 082 123 4567"></label>` : ""}
-      <div class="small grp-for">Use this group for:
-        <label><input type="radio" name="grFor" value="DRIVER" ${!cur || cur.key.startsWith("DRIVER|") || !own ? "checked" : ""} ${drv ? "" : "disabled"}> this driver (${esc(drv || "none")})</label>
-        ${own ? `<label><input type="radio" name="grFor" value="OWNER" ${cur && cur.key.startsWith("OWNER|") ? "checked" : ""}> all ${esc(own)} drivers</label>` : ""}</div>
-      <p class="small" id="grWarn"></p>
-      <div class="row-actions"><button id="grSave" class="primary small-btn" type="button">Save</button>${cur ? `<button id="grDel" class="ghost small-btn" type="button">Remove</button>` : ""}</div>`);
-    const save = async (remove) => {
-      const kind = (document.querySelector('input[name="grFor"]:checked') || {}).value || "DRIVER";
-      const name = remove ? "" : $("grName").value.trim(), link = remove ? "" : $("grLink").value.trim();
-      if (!remove && !name) { $("grWarn").textContent = "Type the group name."; return; }
-      if (link && !NexlWhatsApp.INVITE.test(link)) { $("grWarn").textContent = "That isn't a WhatsApp group invite link (https://chat.whatsapp.com/…). Leave it empty if you don't have one."; return; }
-      const key = remove ? cur.key : NexlWhatsApp.groupKey(kind, kind === "OWNER" ? own : drv);
-      if (!key) { $("grWarn").textContent = "No driver or transporter on this row."; return; }
-      const hadPhone = !!$("grPhone"), phoneIn = hadPhone ? $("grPhone").value.trim() : "", phone = NexlWhatsApp.normPhone(phoneIn);
-      if (!remove && phoneIn && !phone) { $("grWarn").textContent = "That number doesn't look right — use e.g. 082 123 4567 or +27 82 123 4567."; return; }
-      closeModal();
-      const by = await ensureName();
-      try {
-        if (!remove && cur && cur.key !== key) await ExcelIO.writeGroup(cur.key, "", "", by); // moved from driver to owner (or back)
-        await ExcelIO.writeGroup(key, name, link, by);
-        if (drv && hadPhone) await ExcelIO.writeGroup(NexlWhatsApp.groupKey("PHONE", drv), remove ? "" : phone ? "'" + phone : "", "", by);
-        toast(remove ? "Group removed." : `Saved: ${name}`);
-      } catch (e) { toast("Couldn't save the group: " + e.message); }
-      await loadGroups();
-    };
-    $("grSave").onclick = () => save(false);
-    if ($("grDel")) $("grDel").onclick = () => save(true);
-  }
-  async function sendToGroup() {
-    const src = driverSource(), l = src.loads.find((x) => x.id === state.waDrvSel);
-    if (!l) return;
-    const text = $("waDrvMsg").value, g = NexlWhatsApp.groupFor(l, state.groups);
-    if (!g) { editGroup(l); return; }
-    await copyText(text, null); // first: the clipboard only works while this panel has focus
-    const links = NexlWhatsApp.sendLink(text, g);
-    const mode = settings.waOpen || "auto";
-    // Opened in its own tab (open-wa.html): it tries the WhatsApp app and falls back to WhatsApp Web there.
-    // Nothing is opened inside the Excel panel itself (WhatsApp pages refuse to load inside Excel).
-    const helper = new URL("open-wa.html", location.href);
-    helper.search = "";
-    helper.hash = new URLSearchParams({ app: links.app, web: links.web, mode }).toString();
-    // WhatsApp Web already open in a tab (any window)? Use that tab (needs bridge 1.4). Otherwise the helper tab.
-    let reused = false;
-    if (mode !== "app") { const r = await NexlClient.openWhatsApp(links.web).catch(() => null); reused = !!(r && r.ok); }
-    if (!reused) {
-      const w = window.open(helper.toString(), "nexl-whatsapp");
-      if (!w) toast("The browser blocked the WhatsApp tab — allow pop-ups for this site, then try again.");
-    }
-    const paste = `<p class="big-step">📋 The message is copied.<br>Click in the message box, press <b>Ctrl+V</b>, then <b>Enter</b>.</p>`;
-    const opening = reused ? "Switched to your open WhatsApp Web tab" : mode === "web" ? "WhatsApp Web is opening" : mode === "app" ? "The WhatsApp app is opening" : "WhatsApp is opening (the app, or WhatsApp Web if the app doesn't open)";
-    if (links.direct) modal("Send in WhatsApp", `<p class="small">${opening} on the group <b>${esc(g.name)}</b>.</p>${paste}
-      <p class="small muted">WhatsApp doesn't let other programs type into a group, so the message is pasted by you.</p>`);
-    else modal("Send in WhatsApp", `<p class="small">${opening}.</p><p>Open the group <b>${esc(g.name)}</b>.</p>${paste}
-      <p class="small muted">In the app the message may already be typed in — then just pick the group and send. Tip: add the group's invite link (✎ change) and it opens the group straight away.</p>`);
-  }
-
   // Bring the driver message (at the top of the tab) into view and flash it.
   function showDrvBox() {
     const b = $("waDrvBox");
@@ -1128,7 +1053,6 @@
   // ---------- wiring ----------
   function showView(v) {
     state.view = v;
-    if (v === "wa" && !state.groups) loadGroups();
     if (v === "wa" && !state.waGrid) { // load the WhatsApp data only when someone actually opens the tab
       ExcelIO.readTabValues(CFG.whatsAppTab).then((g) => { state.waGrid = g; if (state.view === "wa") renderWhatsApp(); }).catch(() => {});
     }
@@ -1145,8 +1069,6 @@
     bind("sName", "name", "value", (v) => v.trim());
     bind("sSplash", "splash");
     bind("sPopUp", "popUp");
-    bind("sWaApp", "waOpen", "value");
-    bind("sWaTag", "waTag");
     bind("sAuto", "auto");
     bind("sMinutes", "minutes", "value", (v) => (SLOT_CHOICES.includes(+v) ? +v : 5));
     $("sMinutes").addEventListener("change", () => { state.nextSlot = nextSlot(); showNextSync(); });
@@ -1206,7 +1128,6 @@
     $("waDrvCont").addEventListener("change", () => setDrvField("container", $("waDrvCont").checked));
     $("waDrvBook").addEventListener("change", () => setDrvField("booking", $("waDrvBook").checked));
     $("waDrvCopy").addEventListener("click", () => copyText($("waDrvMsg").value, "Driver message"));
-    $("waDrvSend").addEventListener("click", sendToGroup);
     $("waClient").addEventListener("change", () => { state.waClient = $("waClient").value; renderWhatsApp(); });
     if (canHide() && Office.addin.onVisibilityModeChanged) {
       Office.addin.onVisibilityModeChanged((a) => {

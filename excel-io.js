@@ -388,41 +388,6 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Driver WhatsApp groups: a hidden NEXL_GROUPS sheet so the whole team uses the same groups.
-  // ---------------------------------------------------------------------------
-  const GROUP_SHEET = "NEXL_GROUPS";
-  async function readGroups() {
-    const out = {};
-    await Excel.run(async (ctx) => {
-      const ws = ctx.workbook.worksheets.getItemOrNullObject(GROUP_SHEET);
-      await ctx.sync();
-      if (ws.isNullObject) return;
-      const used = ws.getUsedRangeOrNullObject(true);
-      used.load("values");
-      await ctx.sync();
-      if (used.isNullObject) return;
-      for (const [key, name, link, by, at] of used.values.slice(1)) if (key && name) out[String(key)] = { name: String(name), link: String(link || ""), by, at };
-    });
-    return out;
-  }
-  async function writeGroup(key, name, link, by) {
-    await Excel.run(async (ctx) => {
-      let ws = ctx.workbook.worksheets.getItemOrNullObject(GROUP_SHEET);
-      await ctx.sync();
-      if (ws.isNullObject) { ws = ctx.workbook.worksheets.add(GROUP_SHEET); ws.visibility = "Hidden"; }
-      ws.getRange("A1:E1").values = [["Key", "WhatsApp group", "Invite link", "Set by", "When"]];
-      const used = ws.getUsedRange(true);
-      used.load("values,rowCount");
-      await ctx.sync();
-      const keep = used.values.slice(1).filter((r) => r[0] && r[0] !== key).map((r) => r.slice(0, 5));
-      if (name) keep.push([key, name, link || "", by || "", new Date().toISOString()]);
-      ws.getRange(`A2:E${Math.max(used.rowCount, 2) + 1}`).clear("Contents");
-      if (keep.length) ws.getRange(`A2:E${keep.length + 1}`).values = keep;
-      await ctx.sync();
-    });
-  }
-
-  // ---------------------------------------------------------------------------
   // Selection tracking: tell the panel which plan row the user clicked.
   // ---------------------------------------------------------------------------
   const selHandlers = [];
@@ -495,5 +460,5 @@
 
   LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
 
-  root.ExcelIO = { readGroups, writeGroup, readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, setAutoOpen, readExtras, readTabValues };
 })(window);

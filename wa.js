@@ -118,7 +118,6 @@
     const e = !!opts.emoji, r = l.route || {}, f = opts.fields || {};
     const line = (icon, label, v) => `${e ? icon + " " : ""}${label} - ${v || ""}`;
     const out = [e ? "📱 Job on app" : "Job on app", ""];
-    if (opts.tag) out.unshift("@" + opts.tag); // tag the driver in the group (@27821234567)
     // Optional on the Collect line: container and booking (imports / full exports).
     const extra = [f.container && l.container && `Container: ${l.container}`, f.booking && l.portBooking && `Port booking: ${l.portBooking}`].filter(Boolean);
     out.push(line("📦", "Collect", r.collect) + (extra.length ? ` (${extra.join(" · ")})` : ""));
@@ -144,38 +143,6 @@
       });
     }
     return out;
-  }
-
-  // Driver WhatsApp groups (one per driver, or one per transporter/owner): key "DRIVER|NAME" or "OWNER|NAME".
-  const groupKey = (kind, name) => (clean(name) ? `${kind}|${clean(name).toUpperCase()}` : "");
-  function groupFor(load, groups) {
-    if (!load || !groups) return null;
-    for (const k of [groupKey("DRIVER", load.driver), groupKey("DRIVER", load.nexlDriver), groupKey("OWNER", load.transporter)])
-      if (k && groups[k] && groups[k].name) return Object.assign({ key: k }, groups[k]);
-    return null;
-  }
-  /** Link that opens WhatsApp with the message typed in: straight into the group if we have its invite link. */
-  const INVITE = /^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]{10,}/;
-  /** Links for the WhatsApp desktop app (whatsapp://) and for WhatsApp Web. direct = opens the group itself. */
-  function sendLink(text, group) {
-    const m = group && INVITE.exec(group.link || "");
-    if (m) {
-      const code = m[0].split("/").pop();
-      return { app: "whatsapp://chat?code=" + code, web: "https://web.whatsapp.com/accept?code=" + code, direct: true };
-    }
-    return { app: "whatsapp://send?text=" + encodeURIComponent(text), web: "https://web.whatsapp.com/", direct: false };
-  }
-  // Driver numbers for @tags: South African numbers typed as 082 123 4567 become 27821234567.
-  function normPhone(v) {
-    let d = String(v || "").replace(/[^\d+]/g, "");
-    if (d.startsWith("+")) d = d.slice(1); else if (d.startsWith("00")) d = d.slice(2); else if (/^0\d{9}$/.test(d)) d = "27" + d.slice(1);
-    d = d.replace(/\D/g, "");
-    return /^\d{10,15}$/.test(d) ? d : "";
-  }
-  function phoneFor(load, groups) {
-    if (!load || !groups) return "";
-    for (const k of [groupKey("PHONE", load.driver), groupKey("PHONE", load.nexlDriver)]) if (k && groups[k]) return normPhone(groups[k].name);
-    return "";
   }
 
   function byClient(loads) {
@@ -231,5 +198,5 @@
     return out.join("\n");
   }
 
-  root.NexlWhatsApp = { groupKey, groupFor, sendLink, INVITE, normPhone, phoneFor, portBooking, driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
+  root.NexlWhatsApp = { portBooking, driverMessage, driverJobs, routeFor, isStatusWord, dateKey, dateLabel, buildLoads, byClient, formatMessage, liveStatus };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=2.4.0">
+  <link rel="stylesheet" href="taskpane.css?v=2.5.0">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -149,9 +149,7 @@
         <div id="waDrvBox" class="wa" hidden>
           <div class="wa-head"><b id="waDrvTitle"></b><span class="muted small" id="waDrvSrc"></span></div>
           <textarea id="waDrvMsg" class="full wa-msg" rows="7"></textarea>
-          <div class="drv-group small" id="waDrvGroup"></div>
-          <div class="row-actions"><button id="waDrvSend" class="primary small-btn" type="button">📤 Send to group</button>
-            <button id="waDrvCopy" class="ghost small-btn" type="button">Copy driver message</button></div>
+          <div class="row-actions"><button id="waDrvCopy" class="primary small-btn" type="button">📋 Copy driver message</button></div>
         </div>
         <div class="wa-pick">
           <label class="wa-date">📄 Sheet <select id="waDrvSheet"></select></label>
@@ -172,8 +170,6 @@
       </label>
       <label class="check"><input type="checkbox" id="sAutoOpen"> Open Nexl Check automatically with this workbook</label>
       <label class="check"><input type="checkbox" id="sSplash"> Show the start-up animation</label>
-      <label class="check">Open WhatsApp in <select id="sWaApp"><option value="auto">the app if it opens, else WhatsApp Web</option><option value="app">the WhatsApp app only</option><option value="web">WhatsApp Web only</option></select></label>
-      <label class="check"><input type="checkbox" id="sWaTag"> Tag the driver (@number) at the top of driver messages</label>
       <label class="check"><input type="checkbox" id="sPopUp"> When the panel is hidden, pop it back open on a new red error</label>
       <label class="check"><input type="checkbox" id="sAuto"> Auto-refresh every
         <select id="sMinutes"><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="30">30</option></select> min
@@ -211,14 +207,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=2.4.0"></script>
-  <script src="nexl-parsers.js?v=2.4.0"></script>
-  <script src="matcher.js?v=2.4.0"></script>
-  <script src="nexl-client.js?v=2.4.0"></script>
-  <script src="wa.js?v=2.4.0"></script>
-  <script src="excel-io.js?v=2.4.0"></script>
+  <script src="config.js?v=2.5.0"></script>
+  <script src="nexl-parsers.js?v=2.5.0"></script>
+  <script src="matcher.js?v=2.5.0"></script>
+  <script src="nexl-client.js?v=2.5.0"></script>
+  <script src="wa.js?v=2.5.0"></script>
+  <script src="excel-io.js?v=2.5.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=2.4.0"></script>
-  <script src="taskpane.js?v=2.4.0"></script>
+  <script src="photo-check.js?v=2.5.0"></script>
+  <script src="taskpane.js?v=2.5.0"></script>
 </body>
 </html>

@@ -39,11 +39,6 @@
     return send("open", "", 60000, { filter, word, instruction: instruction || null, screen: screen || null });
   }
 
-  /** Bridge 1.4+: switch to an open WhatsApp Web tab in any window ({ok:false, error:"NONE"} if there isn't one). */
-  function openWhatsApp(url) {
-    return send("whatsapp", "", 8000, { url });
-  }
-
   class NexlError extends Error {
     constructor(code, detail) { super(detail || code); this.code = code; }
   }
@@ -123,5 +118,5 @@
     return r.dataUrl;
   }
 
-  root.NexlClient = { openWhatsApp, ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
+  root.NexlClient = { ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, NexlError, get bridgeVersion() { return bridgeVersion; } };
 })(window);
