@@ -113,14 +113,31 @@
     return out;
   }
 
-  /** Nexl's reference search (booking / Reference 2 / 3) for load refs -> {ref: [{instruction, customer, vessel, booking, status}]} */
+  /** Nexl's reference search for load refs -> {ref: [{instruction, customer, vessel, booking, status}]}.
+   *  Nexl matches PART of a word ("26402768" also finds booking 264027688), so a hit only counts when the
+   *  ref is exactly in its Booking Reference, or exactly in Reference 2 / 3 of one of its containers. */
   async function searchRefs(list) {
     const out = {};
+    const key = (v) => String(v == null ? "" : v).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const has = (vals, k) => vals.some((v) => P.expandRef(v).some((x) => key(x) === k));
     await pool(list, 3, async (ref) => {
-      const word = String(ref).trim();
-      if (word.replace(/[^A-Za-z0-9]/g, "").length < 4) return;
-      try { out[ref] = (P.parseSearch(await get(`/php/ajax/search/get.search.php?p_filter=reference&p_word=${encodeURIComponent(word)}`)) || []).filter((x) => x.instruction && !/deleted/i.test(x.status || "")); }
-      catch (e) { if (e.code === "NOT_LOGGED_IN") throw e; if (e.code === "NOT_ALLOWED") refBlocked = true; }
+      const word = String(ref).trim(), k = key(word);
+      if (k.length < 4) return;
+      try {
+        const hits = (P.parseSearch(await get(`/php/ajax/search/get.search.php?p_filter=reference&p_word=${encodeURIComponent(word)}`)) || [])
+          .filter((x) => x.instruction && !/deleted/i.test(x.status || ""));
+        const seen = new Set(), ok = [];
+        for (const h of hits) {
+          const b = P.baseInstr(h.instruction);
+          if (seen.has(b)) continue;
+          seen.add(b);
+          if (has(String(h.booking || "").split(" / "), k)) { ok.push(h); continue; }
+          if (seen.size > 4) continue; // don't open too many
+          const cons = P.parseContainers(await get(`/php/ajax/instruction_containers/get.containers.fresh.php?p_id=${encodeURIComponent(h.instruction.includes(".") ? h.instruction : h.instruction + ".00")}`), h.instruction) || [];
+          if (cons.some((c) => has([c.ref2, c.ref3], k))) ok.push(h);
+        }
+        out[ref] = ok;
+      } catch (e) { if (e.code === "NOT_LOGGED_IN") throw e; if (e.code === "NOT_ALLOWED") refBlocked = true; }
     });
     return out;
   }

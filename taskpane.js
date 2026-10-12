@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.2";
+  const VERSION = "2.6.3";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -381,7 +381,7 @@
     try { if (!(await ExcelIO.getAutoOpenFresh())) await ExcelIO.setAutoOpen(true); } catch (e) { /* not available here */ }
   }
   // Load ref -> Nexl instruction lookups, remembered on this PC: found ones for 7 days, "not in Nexl yet" for 30 min.
-  const REF_KEY = "nexlcheck.refs.v1";
+  const REF_KEY = "nexlcheck.refs.v2"; // v2: only exact matches (v1 could hold partial-match hits)
   function refCacheRaw() { try { return JSON.parse(localStorage.getItem(REF_KEY) || "{}"); } catch (e) { return {}; } }
   function refCacheGet() {
     const now = Date.now(), out = {};

@@ -76,6 +76,27 @@
       .filter(Boolean);
   }
 
+  /** A load ref as typed in Nexl, plus shorthand expanded: "GE3832/33/34/35" -> GE3832, GE3833, GE3834, GE3835. */
+  function expandRef(v) {
+    v = String(v == null ? "" : v).trim();
+    const refs = [v];
+    const parts = v.replace(/\s+/g, "").split("/");
+    const n = parts.length > 1 ? parts[1].length : 0, tail = (x) => +x.slice(-n);
+    if (n && /^[A-Za-z]*\d{3,}$/.test(parts[0]) && parts.slice(1).every((x, i) => /^\d{1,3}$/.test(x) && x.length === n && +x > tail(i ? parts[i] : parts[0]))) {
+      for (const x of parts.slice(1)) refs.push(parts[0].slice(0, parts[0].length - x.length) + x);
+      refs.push(parts[0]);
+    }
+    return refs.filter((x) => x.replace(/[^A-Za-z0-9]/g, "").length >= 4 && !/^TBA$/i.test(x));
+  }
+
+  /** Booking Reference cell "031CP0156501 / 26402768": the parts after the first are client refs (Reference 2). */
+  function bookingRefs(cell) {
+    const parts = String(cell || "").split(" / ").map((x) => x.trim()).filter(Boolean);
+    const out = [];
+    for (const b of parts.slice(1)) out.push(...expandRef(b));
+    return out;
+  }
+
   /** Planning board: planned instructions with their LOAD REF (row tooltip) and the refs in "Booking / Ref". */
   function parsePlanning(html) {
     const t = firstTable(html, ["INSTRUCTION", "CUSTOMER"]);
@@ -85,19 +106,9 @@
       if (!id) return null;
       const title = (r.__tr && (r.__tr.getAttribute ? r.__tr.getAttribute("title") : r.__tr.title)) || "";
       const refs = [];
-      for (const m of String(title).matchAll(/LOAD REF:\s*([^\n\r]+)/gi)) {
-        const v = m[1].trim();
-        refs.push(v);
-        // "GE3832/33/34/35" -> GE3832, GE3833, GE3834, GE3835
-        const parts = v.replace(/\s+/g, "").split("/");
-        const n = parts.length > 1 ? parts[1].length : 0, tail = (x) => +x.slice(-n);
-        if (n && /^[A-Za-z]*\d{3,}$/.test(parts[0]) && parts.slice(1).every((x, i) => /^\d{1,3}$/.test(x) && x.length === n && +x > tail(i ? parts[i] : parts[0]))) {
-          for (const x of parts.slice(1)) refs.push(parts[0].slice(0, parts[0].length - x.length) + x);
-          refs.push(parts[0]);
-        }
-      }
-      const book = String(r["BOOKING REFERENCE"] || "").split("/").map((x) => x.trim()).filter(Boolean);
-      refs.push(...book.slice(1));
+      for (const m of String(title).matchAll(/LOAD REF:\s*([^\n\r]+)/gi)) refs.push(...expandRef(m[1]));
+      const book = String(r["BOOKING REFERENCE"] || "").split(" / ").map((x) => x.trim()).filter(Boolean);
+      refs.push(...bookingRefs(r["BOOKING REFERENCE"]));
       return { id, base: baseInstr(id), customer: r["CUSTOMER"] || "", booking: book[0] || "", vessel: r["VESSEL"] || "", startTime: r["START TIME"] || "",
         loadRefs: [...new Set(refs.filter((x) => x.replace(/[^A-Za-z0-9]/g, "").length >= 4 && !/^TBA$/i.test(x)))] };
     }).filter(Boolean);
@@ -172,5 +183,5 @@
       .filter((r) => r.instruction && r.container);
   }
 
-  root.NexlParsers = { parseStatusScreen, parsePlanning, parseContainers, parseDriverTracking, parseSearch, normInstr, baseInstr, clean };
+  root.NexlParsers = { parseStatusScreen, parsePlanning, expandRef, bookingRefs, parseContainers, parseDriverTracking, parseSearch, normInstr, baseInstr, clean };
 })(typeof window !== "undefined" ? window : globalThis);

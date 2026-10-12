@@ -117,6 +117,9 @@
         put(c.ref2, { instruction: baseInstr(instr), base: baseInstr(instr), customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
       }
     }
+    // Active / completed instructions show the client ref in Booking Reference ("booking / load ref").
+    for (const i of nexl.instructions || []) for (const ref of root.NexlParsers.bookingRefs(i.booking))
+      put(ref, { instruction: i.base, base: i.base, customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
     // Planned instructions (Planning board) carry the load ref on the instruction itself.
     for (const p of nexl.planning || []) for (const ref of p.loadRefs || [])
       put(ref, { instruction: p.base, base: p.base, customer: p.customer || "", vessel: p.vessel || "", state: "Planned" });
