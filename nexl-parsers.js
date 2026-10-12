@@ -110,6 +110,7 @@
       const book = String(r["BOOKING REFERENCE"] || "").split(" / ").map((x) => x.trim()).filter(Boolean);
       refs.push(...bookingRefs(r["BOOKING REFERENCE"]));
       return { id, base: baseInstr(id), customer: r["CUSTOMER"] || "", booking: book[0] || "", vessel: r["VESSEL"] || "", startTime: r["START TIME"] || "",
+        type: r["TYPE"] || "", remaining: r["QUANTITIES"] || "", route: r["ROUTE"] || "", completion: r["COMPLETION"] || "", location: r["LOCATION"] || "",
         loadRefs: [...new Set(refs.filter((x) => x.replace(/[^A-Za-z0-9]/g, "").length >= 4 && !/^TBA$/i.test(x)))] };
     }).filter(Boolean);
   }

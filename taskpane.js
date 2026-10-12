@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.3";
+  const VERSION = "2.6.4";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -113,6 +113,8 @@
       catch (e) { if (e.code === "NOT_LOGGED_IN") pill("nexlPill", false, "Nexl: log in"); throw e; }
       pill("nexlPill", true, "Nexl");
       const planning = await NexlClient.getPlanning(settings.region);
+      // Planned instructions are valid instructions too: check sheet rows that carry them.
+      { const have = new Set(instructions.map((i) => i.id)); for (const p of planning) if (!have.has(p.id)) instructions.push({ ...p, state: "Planned" }); }
       const bases = new Set(instructions.map((i) => i.base));
 
       progress(0.22, "Reading plan tabs…");
@@ -307,7 +309,9 @@
     const list = (state.input && state.input.nexl && state.input.nexl.instructions) || [];
     const b = String(id || "").split(".")[0];
     const hit = list.find((x) => x.id === String(id)) || list.find((x) => x.base === b);
-    return hit && /complete/i.test(hit.state || "") ? "completed" : "active";
+    if (hit) return /complete/i.test(hit.state || "") ? "completed" : "active";
+    const plan = (state.input && state.input.nexl && state.input.nexl.planning) || [];
+    return plan.some((x) => x.id === String(id) || x.base === b) ? "planning" : "active";
   }
   async function openNexl(word, filter, instruction) {
     const w = String(word || instruction || "").trim();
@@ -316,7 +320,7 @@
     toast(ins ? `Opening ${ins} in Nexl…` : `Searching Nexl for ${w}…`);
     const r = await NexlClient.openInNexl(filter, w, ins, ins ? screenFor(ins) : null);
     if (r.ok) {
-      if (ins && r.how === "search") toast(`${ins} isn't on Active, Completed or Finance — showing Nexl's search instead.`);
+      if (ins && r.how === "search") toast(`${ins} isn't on Active, Planning, Completed or Finance — showing Nexl's search instead.`);
       return;
     }
     if (r.error === "NOT_LOGGED_IN") { toast("Log in to Nexl first, then try again."); return; }

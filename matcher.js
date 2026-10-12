@@ -203,6 +203,9 @@
     for (const [k, v] of Object.entries(nexl.search || {})) search[compact(k)] = v;
     const instrById = new Map();
     for (const i of nexl.instructions || []) if (!instrById.has(i.id)) instrById.set(i.id, i);
+    const planIds = new Set((nexl.planning || []).map((p) => p.id));
+    const isPlanned = (c) => !!c && (planIds.has(c.instruction) || (instrById.get(c.instruction) || {}).state === "Planned"
+      || /plan|pending|not ?alloc|unalloc/i.test(c.moveStatus || ""));
     const bases = new Set([...instrById.values()].map((i) => i.base));
     for (const id of Object.keys(nexl.containers || {})) bases.add(baseInstr(id));
 
@@ -279,6 +282,8 @@
         const hits = pool.filter((n) => n.key === key);
         const hit = hits.find((n) => n.instruction === id && !n.used) || hits.find((n) => !n.used) || hits[0];
         if (!hit) {
+          // Planned instruction (Planning board) without real container numbers yet: valid, nothing to compare.
+          if ((instrById.get(id) || instrById.get(b) || {}).state === "Planned" && !pool.some((n) => n.key && !/^PENDING/.test(n.key)) && !(nexlByContainer.get(key) || []).length) continue;
           const elsewhere = (nexlByContainer.get(key) || [])[0];
           const searched = search[key];
           if (elsewhere) {
@@ -339,6 +344,8 @@
           } else if (f === "customer") {
             const nv = instr ? instr.customer : "";
             if (!nameMatch(sv, nv)) add("warn", "customer", sv, nv, "Customer differs");
+          } else if ((f === "transporter" || f === "driver") && isPlanned(hit)) {
+            continue; // planned job: driver/transporter not allocated yet
           } else if (f === "transporter") {
             if (!nameMatch(sv, hit.owner)) add("warn", "transporter", sv, hit.owner, "Transporter differs");
           } else if (f === "driver") {
@@ -484,8 +491,11 @@
           addFill("seal", n.seal);
           if (rowFills.length > b4) Object.assign(rowFills[rowFills.length - 1], { needsPhoto: true, photoKind: "seal", nexlRowId: n.rowId || "" });
         }
-        if (r.compare.includes("driver")) addFill("driver", (n.driver || "").split(" ")[0]);
-        if (r.compare.includes("transporter")) addFill("transporter", (n.owner || "").split(" ")[0]);
+        // A driver/transporter shown on a planned (not yet allocated) job is only a plan: don't fill it.
+        if (!isPlanned(n)) {
+          if (r.compare.includes("driver")) addFill("driver", (n.driver || "").split(" ")[0]);
+          if (r.compare.includes("transporter")) addFill("transporter", (n.owner || "").split(" ")[0]);
+        }
       } else if (!r.key && r.tracking) {
         addFill("driver", r.tracking.driver.split(" ")[0]);
       }
