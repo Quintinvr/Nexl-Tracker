@@ -150,17 +150,46 @@
     // Planned instructions (Planning board) carry the load ref on the instruction itself.
     for (const p of nexl.planning || []) for (const ref of p.loadRefs || [])
       put(ref, { instruction: p.base, base: p.base, customer: p.customer || "", vessel: p.vessel || "", state: "Planned" });
+    // Booking numbers (EXPORTS P.E links rows by BOOKING NO.): every part of Nexl's Booking Reference field.
+    const bookMap = new Map();
+    const putBook = (ref, info) => {
+      const k = refKey(ref);
+      if (k.length < 4) return;
+      if (!bookMap.has(k)) bookMap.set(k, new Map());
+      const m = bookMap.get(k);
+      if (!m.has(info.base)) m.set(info.base, info);
+    };
+    const bookParts = (v) => String(v || "").split(" / ").map((x) => x.trim()).filter((x) => x && !/^(TBA|TBC|N\/?A|BREAKBULK)$/i.test(x));
+    for (const i of nexl.instructions || []) for (const bk of bookParts(i.booking))
+      putBook(bk, { instruction: i.base, base: i.base, customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
+    for (const p of nexl.planning || []) for (const bk of bookParts(p.booking))
+      putBook(bk, { instruction: p.base, base: p.base, customer: p.customer || "", vessel: p.vessel || "", state: "Planned" });
     const searched = new Set();
     for (const [ref, hits] of Object.entries(nexl.refSearch || {})) {
       searched.add(refKey(ref));
       for (const h of hits || []) {
         if (!h.instruction) continue;
         const b = baseInstr(h.instruction), i = instrById.get(b) || {};
-        put(ref, { instruction: b, base: b, customer: h.customer || i.customer || "", vessel: h.vessel || i.vessel || "", state: i.state || h.status || "", booking: h.booking || "" });
+        const info = { instruction: b, base: b, customer: h.customer || i.customer || "", vessel: h.vessel || i.vessel || "", state: i.state || h.status || "", booking: h.booking || "" };
+        put(ref, info);
+        putBook(ref, info); // searchRefs only keeps exact matches (Booking Reference or Reference 2/3)
       }
     }
-    const lookup = (loadRef) => {
+    // Containers per instruction base (to narrow a booking that has several instructions)
+    const consByBase = new Map();
+    for (const [id, list] of Object.entries(nexl.containers || {})) for (const c of list || []) {
+      const k = compact(c.container);
+      if (!k || /^PENDING/.test(k)) continue;
+      const b = baseInstr(c.instruction || id);
+      if (!consByBase.has(b)) consByBase.set(b, new Set());
+      consByBase.get(b).add(k);
+    }
+    const lookup = (loadRef, kind) => {
       const k = refKey(loadRef);
+      if (kind === "booking") { // Booking Reference parts, else Reference 2 (CMA CGM's DBA… numbers sit there)
+        const m = bookMap.get(k) || map.get(k);
+        return m ? [...m.values()] : [];
+      }
       let m = map.get(k);
       if (!m) { // "FHR261882" on the sheet vs "FHR261882/HQ,XB" in Nexl
         for (const [kk, mm] of map) if (refHead(kk) === k && k.length >= 6) { m = mm; break; }
@@ -181,20 +210,31 @@
     const fills = [], mismatches = [], toSearch = new Map(); // ref -> {blank, row}
     let curRow = 0, curBlank = false;
     const ask = (ref) => { const o = toSearch.get(ref); if (!o || (curBlank && !o.blank) || (curBlank === o.blank && curRow > o.row)) toSearch.set(ref, { blank: curBlank, row: curRow }); };
-    const consider = (tab, row, instr, loadRef, container, colInstr) => {
+    const ambiguous = [];
+    const consider = (tab, row, instr, loadRef, container, colInstr, kind = "loadRef") => {
       if (!loadRef || refKey(loadRef).length < 4) return;
       curRow = row; curBlank = !instr;
-      const hits = lookup(loadRef);
+      let hits = lookup(loadRef, kind);
+      const ck = compact(container);
+      if (kind === "booking" && hits.length > 1 && ck && !/^PENDING/.test(ck)) {
+        // one booking, several instructions: keep the one(s) Nexl has this container on
+        const on = hits.filter((h) => (consByBase.get(h.base) || new Set()).has(ck));
+        if (on.length) hits = on;
+      }
       if (!instr) {
         if (!hits.length) { if (!searched.has(refKey(loadRef))) ask(loadRef); return; }
+        if (kind === "booking" && hits.length > 1) { // can't tell which one: list it, don't fill
+          ambiguous.push({ tab, row, col: colInstr, kind, loadRef, options: hits.map((h) => h.base).sort() });
+          return;
+        }
         const b = best(hits);
-        fills.push({ tab, row, col: colInstr, field: "instruction", value: b.base, loadRef, customer: b.customer, vessel: b.vessel, state: b.state,
+        fills.push({ tab, row, col: colInstr, field: "instruction", value: b.base, loadRef, kind, customer: b.customer, vessel: b.vessel, state: b.state,
           others: hits.filter((h) => h.base !== b.base).map((h) => h.base) });
         return;
       }
       const sb = baseInstr(instr);
       if (!hits.length) {
-        const own = ownRefs.get(sb);
+        const own = kind === "booking" ? null : ownRefs.get(sb);
         const suspicious = !instrById.has(sb) || (own && own.size && !own.has(refKey(loadRef)) && !own.has(refHead(loadRef)));
         if (suspicious && !searched.has(refKey(loadRef))) ask(loadRef);
         return;
@@ -203,22 +243,25 @@
       // Only trust a mismatch when Nexl was asked about this ref directly, or the sheet's own instruction was read and doesn't carry it.
       const b = best(hits);
       if (!searched.has(refKey(loadRef)) && !instrById.has(sb)) { ask(loadRef); return; }
-      mismatches.push({ tab, row, col: colInstr, sheetInstr: instr, nexlInstr: b.base, loadRef, customer: b.customer, vessel: b.vessel, container,
+      mismatches.push({ tab, row, col: colInstr, sheetInstr: instr, nexlInstr: b.base, loadRef, kind, customer: b.customer, vessel: b.vessel, container,
         others: hits.map((h) => h.base) });
     };
     // Rows the matcher already reads (instruction in Nexl's current lists)
+    const linkBy = new Map(sheetTabs.map((t) => [t.name, t.linkBy || "loadRef"]));
     for (const r of rowRecs) {
-      if (r.cols.loadRef === undefined) continue;
-      consider(r.tab, r.row, r.id, clean(r.vals[r.cols.loadRef]), r.container, colLetter(r.cols.instruction));
+      const kf = linkBy.get(r.tab) || "loadRef";
+      if (r.cols[kf] === undefined) continue;
+      consider(r.tab, r.row, r.id, clean(r.vals[r.cols[kf]]), r.container, colLetter(r.cols.instruction), kf);
     }
-    // Other rows with a load ref: empty instruction, or an instruction Nexl doesn't list as current
+    // Other rows with a load ref / booking: empty instruction, or an instruction Nexl doesn't list as current
     for (const t of sheetTabs) {
-      if (!t.refRows || t.cols.loadRef === undefined) continue;
-      for (const x of t.refRows) consider(t.name, x.row, normInstr(x.instr), clean(x.loadRef), clean(x.container), colLetter(t.cols.instruction));
+      const kf = t.linkBy || "loadRef";
+      if (!t.refRows || t.cols[kf] === undefined) continue;
+      for (const x of t.refRows) consider(t.name, x.row, normInstr(x.instr), clean(x.loadRef), clean(x.container), colLetter(t.cols.instruction), kf);
     }
     // Look up empty instruction cells first, newest (lowest on the sheet) first; then the rest, newest first.
     const order = [...toSearch].sort((a, b) => (b[1].blank - a[1].blank) || (b[1].row - a[1].row)).map((x) => x[0]);
-    return { fills, mismatches, toSearch: order, blankPending: [...toSearch.values()].filter((o) => o.blank).length };
+    return { fills, mismatches, ambiguous, toSearch: order, blankPending: [...toSearch.values()].filter((o) => o.blank).length };
   }
 
   function compare(sheetTabs, nexl, opts = {}) {
@@ -416,7 +459,7 @@
       const leg = m.kind === "leg";
       const iss = { severity: "error", field: "instruction", code: leg ? "leg" : "loadref", sheet: m.sheetInstr, nexl: m.nexlInstr,
         message: leg ? `Container ${m.container} is on Nexl ${m.nexlInstr}, the sheet says ${m.sheetInstr} (wrong leg)`
-          : `Load ref ${m.loadRef} is on Nexl instruction ${m.nexlInstr}${m.customer ? ` (${m.customer})` : ""}, the sheet says ${m.sheetInstr}`,
+          : `${m.kind === "booking" ? "Booking" : "Load ref"} ${m.loadRef} is on Nexl instruction ${m.nexlInstr}${m.customer ? ` (${m.customer})` : ""}, the sheet says ${m.sheetInstr}`,
         short: leg ? `⛔ Leg ≠ Nexl ${m.nexlInstr}` : `⛔ Instr ≠ Nexl ${m.nexlInstr}`,
         instruction: m.sheetInstr, container: m.container || m.loadRef, ref: { tab: m.tab, row: m.row, col: m.col } };
       m.issue = iss;

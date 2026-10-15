@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.7";
+  const VERSION = "2.6.8";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -700,21 +700,24 @@
     const go = (x) => `<button class="link go-cell" data-gotab="${esc(x.tab)}" data-gorow="${x.row}" data-gocol="${esc(x.col)}" type="button" title="Go to the cell">📍 ${esc(x.tab)} ${esc(x.col + x.row)}</button>`;
     $("instrBad").innerHTML = bad.length ? bad.map((m, k) => `<div class="card error">
         <div class="where">${go(m)}<span>${m.issue && m.issue.ack ? (m.issue.bypass ? "✔ bypassed" : "👀 on it") : ""}</span></div>
-        <div class="what">${m.kind === "leg" ? `Container <b class="mono">${esc(m.container)}</b> is on leg` : `Load ref <b class="mono">${esc(m.loadRef)}</b> is on`} Nexl <b class="mono">${esc(m.nexlInstr)}</b>${m.customer ? ` · ${esc(m.customer)}` : ""}${m.vessel ? ` · ${esc(m.vessel)}` : ""}</div>
+        <div class="what">${m.kind === "leg" ? `Container <b class="mono">${esc(m.container)}</b> is on leg` : `${m.kind === "booking" ? "Booking" : "Load ref"} <b class="mono">${esc(m.loadRef)}</b> is on`} Nexl <b class="mono">${esc(m.nexlInstr)}</b>${m.customer ? ` · ${esc(m.customer)}` : ""}${m.vessel ? ` · ${esc(m.vessel)}` : ""}</div>
         <dl class="vals"><dt>Sheet</dt><dd class="mono">${esc(m.sheetInstr)}</dd><dt>Nexl</dt><dd class="mono">${esc(m.nexlInstr)}${m.others.length > 1 ? ` <span class="muted small">(also ${esc(m.others.filter((o) => o !== m.nexlInstr).join(", "))})</span>` : ""}</dd></dl>
         <div class="card-actions"><button class="primary xs" data-fixinstr="${k}" type="button">Put ${esc(m.nexlInstr)} in the sheet</button>
           <button class="ghost xs" data-nexlinstr="${esc(m.nexlInstr)}" type="button">Nexl ↗</button></div></div>`).join("")
-      : `<p class="empty">Every instruction with a load ref matches Nexl. ✓</p>`;
+      : `<p class="empty">Every instruction with a load ref / booking matches Nexl. ✓</p>`;
     for (const k of [...state.instrSel]) if (k >= fills.length) state.instrSel.delete(k);
     $("instrFill").innerHTML = fills.length ? fills.map((f, k) => `<div class="fill"><input type="checkbox" data-ik="${k}" ${state.instrSel.has(k) ? "checked" : ""}>
-        <span>${go(f)} · load ref <span class="mono">${esc(f.loadRef)}</span> → <b class="mono">${esc(f.value)}</b>
+        <span>${go(f)} · ${f.kind === "booking" ? "booking" : "load ref"} <span class="mono">${esc(f.loadRef)}</span> → <b class="mono">${esc(f.value)}</b>
         <span class="muted">${esc([f.state === "Planned" ? "📝 Planned" : "", f.customer, f.vessel].filter(Boolean).join(" · "))}${f.others.length ? ` · also on ${esc(f.others.join(", "))} — check` : ""}</span>
         <button class="primary xs" data-fillinstr="${k}" type="button">Fill</button></span></div>`).join("")
-      : `<p class="empty">No empty instruction cells with a load ref Nexl knows.</p>`;
+      : `<p class="empty">No empty instruction cells with a load ref / booking Nexl knows.</p>`;
     $("instrFillActions").hidden = !fills.length;
+    const amb = L.ambiguous || [];
+    $("instrAmb").innerHTML = amb.length ? `<p class="small"><b>Booking on several Nexl instructions</b> — not filled, pick the right one:</p>` + amb.map((a) =>
+      `<div class="fill"><span>${go(a)} · booking <span class="mono">${esc(a.loadRef)}</span> → ${a.options.map((o) => `<button class="link xs mono" data-nexlinstr="${esc(o)}" type="button" title="Open in Nexl">${esc(o)}</button>`).join(" ")}</span></div>`).join("") : "";
     const pend = (L.toSearch || []).length;
     $("instrNote").textContent = (NexlClient.refBlocked || NexlClient.planBlocked) ? "Update the Nexl Check Bridge extension to 1.5.1 so load refs and planned instructions can be looked up in Nexl."
-      : pend ? `${pend} more load ref(s) will be looked up in Nexl on the next syncs.` : "";
+      : pend ? `${pend} more load ref(s) / booking(s) will be looked up in Nexl on the next syncs.` : "";
     const root = $("view-instr");
     root.querySelectorAll("[data-gotab]").forEach((b) => (b.onclick = () => { const ref = { tab: b.dataset.gotab, row: +b.dataset.gorow, col: b.dataset.gocol }; ExcelIO.goTo(ref).catch(() => {}); }));
     root.querySelectorAll("[data-ik]").forEach((cb) => (cb.onchange = () => { const k = +cb.dataset.ik; cb.checked ? state.instrSel.add(k) : state.instrSel.delete(k); }));

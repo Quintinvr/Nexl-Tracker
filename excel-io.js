@@ -39,12 +39,13 @@
         //    linking rows to their Nexl instruction through Reference 2).
         const wanted = [];
         const refRows = [];
-        const hasRef = cols.loadRef !== undefined;
+        const keyField = tab.linkBy || "loadRef"; // column that links a row to its Nexl instruction
+        const hasRef = cols[keyField] !== undefined;
         for (let r = first; r < lastRow; r += 5000) {
           const n = Math.min(5000, lastRow - r);
           const rng = ws.getRangeByIndexes(r, cols.instruction, n, 1);
           rng.load("values");
-          const refRng = hasRef ? ws.getRangeByIndexes(r, cols.loadRef, n, 1) : null;
+          const refRng = hasRef ? ws.getRangeByIndexes(r, cols[keyField], n, 1) : null;
           const conRng = hasRef ? ws.getRangeByIndexes(r, cols.container, n, 1) : null;
           if (refRng) { refRng.load("values"); conRng.load("values"); }
           await ctx.sync();
@@ -57,6 +58,9 @@
             }
           });
         }
+        // Only the most recent rows are linked (older history isn't looked up, to keep Nexl light).
+        const recentFrom = lastRow - 400;
+        for (let k = refRows.length - 1; k >= 0; k--) if (refRows[k].row <= recentFrom) refRows.splice(k, 1);
         // 2) Full rows, as contiguous blocks.
         const blocks = [];
         for (const r of wanted) {
@@ -67,7 +71,7 @@
         if (loaded.length) await ctx.sync();
         const rows = [];
         for (const { b, rng } of loaded) rng.values.forEach((vals, i) => rows.push({ row: b.start + i + 1, values: vals }));
-        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, planned: !!tab.planned, cols, rows, refRows });
+        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, planned: !!tab.planned, linkBy: keyField, cols, rows, refRows });
       }
       return out;
     });
