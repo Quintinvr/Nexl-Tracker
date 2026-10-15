@@ -258,6 +258,7 @@
     const issues = [];
     const groups = new Map(); // base -> group
     const seen = new Set();
+    const legMismatches = []; // container on another leg (.01/.02…) than the sheet says
     const stats = { rowsChecked: 0, matched: 0, mismatched: 0, notInNexl: 0, missingFromSheet: 0, openSlots: 0 };
 
     const groupFor = (b) => {
@@ -307,13 +308,21 @@
 
         const pool = nexlByBase.get(b) || [];
         const hits = pool.filter((n) => n.key === key);
-        // Legs: 87248.01 = empty -> pack -> ground at depot, 87248.02 = depot -> port. A route change adds a new
-        // leg (.01, .02, .03…) and the old one may be deleted. A sheet number without a leg (or with a leg Nexl no
-        // longer has) takes the port leg (highest) on PLUGGED IN - GROUNDED, the first live leg elsewhere.
+        // Legs: 87248.01 = empty -> pack -> ground at depot, 87248.02 = depot -> port; a route change adds a new
+        // leg (.03…) and the old one may be deleted. The sheet always shows the leg, so only that exact leg counts.
+        // Container on another leg of the same instruction -> error with the leg Nexl has (fix in Instruction tab).
         const legNo = (n) => +(String(n.instruction).split(".")[1] || 0);
-        const byLeg = [...hits].sort((x, y) => legNo(x) - legNo(y));
-        if (/PLUGGED|GROUNDED/i.test(tab.name)) byLeg.reverse();
-        const hit = hits.find((n) => n.instruction === id && !n.used) || byLeg.find((n) => !n.used) || byLeg[0];
+        const hit = hits.find((n) => n.instruction === id && !n.used) || hits.find((n) => n.instruction === id);
+        if (!hit && hits.length) {
+          const byLeg = [...hits].sort((x, y) => legNo(x) - legNo(y));
+          if (/PLUGGED|GROUNDED/i.test(tab.name)) byLeg.reverse();
+          const other = byLeg.find((n) => !n.used) || byLeg[0];
+          const oi = instrById.get(other.instruction) || {};
+          legMismatches.push({ kind: "leg", tab: tab.name, row: r.row, col: colLetter(col.instruction), sheetInstr: id, nexlInstr: other.instruction,
+            container: cont, customer: oi.customer || "", vessel: oi.vessel || "", others: [...new Set(hits.map((n) => n.instruction))] });
+          stats.mismatched++;
+          continue;
+        }
         if (!hit) {
           // Planned instruction (Planning board) without real container numbers yet: valid, nothing to compare.
           if ((instrById.get(id) || instrById.get(b) || {}).state === "Planned" && !pool.some((n) => n.key && !/^PENDING/.test(n.key)) && !(nexlByContainer.get(key) || []).length) continue;
@@ -402,10 +411,13 @@
     // Empty instruction cell + load ref known in Nexl  -> offered as an auto-fill (no alert).
     // Instruction on the sheet that isn't the one Nexl has for that load ref -> error.
     const instrLinks = linkInstructions(sheetTabs, nexl, rowRecs, instrById);
+    instrLinks.mismatches.push(...legMismatches.filter((g) => !instrLinks.mismatches.some((m) => m.tab === g.tab && m.row === g.row)));
     for (const m of instrLinks.mismatches) {
-      const iss = { severity: "error", field: "instruction", code: "loadref", sheet: m.sheetInstr, nexl: m.nexlInstr,
-        message: `Load ref ${m.loadRef} is on Nexl instruction ${m.nexlInstr}${m.customer ? ` (${m.customer})` : ""}, the sheet says ${m.sheetInstr}`,
-        short: `⛔ Instr ≠ Nexl ${m.nexlInstr}`,
+      const leg = m.kind === "leg";
+      const iss = { severity: "error", field: "instruction", code: leg ? "leg" : "loadref", sheet: m.sheetInstr, nexl: m.nexlInstr,
+        message: leg ? `Container ${m.container} is on Nexl ${m.nexlInstr}, the sheet says ${m.sheetInstr} (wrong leg)`
+          : `Load ref ${m.loadRef} is on Nexl instruction ${m.nexlInstr}${m.customer ? ` (${m.customer})` : ""}, the sheet says ${m.sheetInstr}`,
+        short: leg ? `⛔ Leg ≠ Nexl ${m.nexlInstr}` : `⛔ Instr ≠ Nexl ${m.nexlInstr}`,
         instruction: m.sheetInstr, container: m.container || m.loadRef, ref: { tab: m.tab, row: m.row, col: m.col } };
       m.issue = iss;
       issues.push(iss);

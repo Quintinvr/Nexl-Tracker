@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.6";
+  const VERSION = "2.6.7";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -700,7 +700,7 @@
     const go = (x) => `<button class="link go-cell" data-gotab="${esc(x.tab)}" data-gorow="${x.row}" data-gocol="${esc(x.col)}" type="button" title="Go to the cell">📍 ${esc(x.tab)} ${esc(x.col + x.row)}</button>`;
     $("instrBad").innerHTML = bad.length ? bad.map((m, k) => `<div class="card error">
         <div class="where">${go(m)}<span>${m.issue && m.issue.ack ? (m.issue.bypass ? "✔ bypassed" : "👀 on it") : ""}</span></div>
-        <div class="what">Load ref <b class="mono">${esc(m.loadRef)}</b> is on Nexl <b class="mono">${esc(m.nexlInstr)}</b>${m.customer ? ` · ${esc(m.customer)}` : ""}${m.vessel ? ` · ${esc(m.vessel)}` : ""}</div>
+        <div class="what">${m.kind === "leg" ? `Container <b class="mono">${esc(m.container)}</b> is on leg` : `Load ref <b class="mono">${esc(m.loadRef)}</b> is on`} Nexl <b class="mono">${esc(m.nexlInstr)}</b>${m.customer ? ` · ${esc(m.customer)}` : ""}${m.vessel ? ` · ${esc(m.vessel)}` : ""}</div>
         <dl class="vals"><dt>Sheet</dt><dd class="mono">${esc(m.sheetInstr)}</dd><dt>Nexl</dt><dd class="mono">${esc(m.nexlInstr)}${m.others.length > 1 ? ` <span class="muted small">(also ${esc(m.others.filter((o) => o !== m.nexlInstr).join(", "))})</span>` : ""}</dd></dl>
         <div class="card-actions"><button class="primary xs" data-fixinstr="${k}" type="button">Put ${esc(m.nexlInstr)} in the sheet</button>
           <button class="ghost xs" data-nexlinstr="${esc(m.nexlInstr)}" type="button">Nexl ↗</button></div></div>`).join("")
