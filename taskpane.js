@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.6.5";
+  const VERSION = "2.6.6";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -313,10 +313,20 @@
     const plan = (state.input && state.input.nexl && state.input.nexl.planning) || [];
     return plan.some((x) => x.id === String(id) || x.base === b) ? "planning" : "active";
   }
+  // 87388 on the sheet but .00 was deleted after a route change -> open the live leg (87388.01).
+  function liveLeg(id) {
+    const nx = (state.input && state.input.nexl) || {};
+    const all = [...(nx.instructions || []), ...(nx.planning || [])].map((x) => x.id);
+    if (all.includes(String(id))) return String(id);
+    const b = String(id).split(".")[0];
+    const legs = all.filter((x) => x.split(".")[0] === b).sort((x, y) => +(x.split(".")[1] || 0) - +(y.split(".")[1] || 0));
+    return legs.length ? legs[legs.length - 1] : String(id);
+  }
   async function openNexl(word, filter, instruction) {
     const w = String(word || instruction || "").trim();
     if (!w) return;
-    const ins = /^\d{3,8}(\.\d{1,2})?$/.test(String(instruction || "")) ? String(instruction) : null;
+    let ins = /^\d{3,8}(\.\d{1,2})?$/.test(String(instruction || "")) ? String(instruction) : null;
+    if (ins) ins = liveLeg(ins);
     toast(ins ? `Opening ${ins} in Nexl…` : `Searching Nexl for ${w}…`);
     const r = await NexlClient.openInNexl(filter, w, ins, ins ? screenFor(ins) : null);
     if (r.ok) {

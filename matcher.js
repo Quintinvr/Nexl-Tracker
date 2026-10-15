@@ -307,7 +307,13 @@
 
         const pool = nexlByBase.get(b) || [];
         const hits = pool.filter((n) => n.key === key);
-        const hit = hits.find((n) => n.instruction === id && !n.used) || hits.find((n) => !n.used) || hits[0];
+        // Legs: 87248.01 = empty -> pack -> ground at depot, 87248.02 = depot -> port. A route change adds a new
+        // leg (.01, .02, .03…) and the old one may be deleted. A sheet number without a leg (or with a leg Nexl no
+        // longer has) takes the port leg (highest) on PLUGGED IN - GROUNDED, the first live leg elsewhere.
+        const legNo = (n) => +(String(n.instruction).split(".")[1] || 0);
+        const byLeg = [...hits].sort((x, y) => legNo(x) - legNo(y));
+        if (/PLUGGED|GROUNDED/i.test(tab.name)) byLeg.reverse();
+        const hit = hits.find((n) => n.instruction === id && !n.used) || byLeg.find((n) => !n.used) || byLeg[0];
         if (!hit) {
           // Planned instruction (Planning board) without real container numbers yet: valid, nothing to compare.
           if ((instrById.get(id) || instrById.get(b) || {}).state === "Planned" && !pool.some((n) => n.key && !/^PENDING/.test(n.key)) && !(nexlByContainer.get(key) || []).length) continue;
