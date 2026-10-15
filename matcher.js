@@ -13,6 +13,33 @@
   const tokens = (s, min = 3) =>
     clean(s).toUpperCase().split(/[^A-Z0-9]+/).filter((t) => t.length >= min && !STOP.has(t));
 
+  // Driver names: the sheet uses short names ("SIPS", "FRED", "S NXUMALO"), Nexl the full name plus
+  // company ("SIPHO NXUMALO CFT"). Two name words match when equal, one starts with the other (3+ letters),
+  // a short nickname shares its first 3+ letters ("SIPS" ~ "SIPHO", "ZIMS" ~ "ZIMELE"), or a typo of 1 letter.
+  function nameTok(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const [sh, lo] = a.length <= b.length ? [a, b] : [b, a];
+    if (sh.length >= 3 && lo.startsWith(sh)) return true;
+    let p = 0;
+    while (p < sh.length && sh[p] === lo[p]) p++;
+    if (p >= 3 && sh.length <= 5 && p >= sh.length - 1) return true;
+    return sh.length >= 5 && editDistance(sh, lo) <= 1;
+  }
+  function driverMatch(sheet, nexl) {
+    const nt = tokens(nexl, 2);
+    if (!nt.length) return false;
+    const st = tokens(sheet, 2);
+    if (st.some((t) => t.length >= 3 && nt.some((n) => nameTok(t, n)))) return true;
+    // initials: "SN" / "S.N." / "S N" ~ SIPHO NXUMALO
+    const ini = clean(sheet).toUpperCase().replace(/[^A-Z]/g, "");
+    if (ini.length >= 2 && ini.length <= 3 && clean(sheet).replace(/[^A-Za-z]/g, "").length <= 3) {
+      const nIni = nt.slice(0, ini.length).map((x) => x[0]).join("");
+      if (nIni === ini) return true;
+    }
+    return false;
+  }
+
   function editDistance(a, b) {
     if (Math.abs(a.length - b.length) > 2) return 99;
     const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -256,7 +283,7 @@
 
         const cont = get(r.values, "container");
         const key = compact(cont);
-        const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))),
+        const rec = { tab: tab.name, row: r.row, id, base: b, key, container: cont, tokens: new Set(r.values.flatMap((v) => tokens(v, 3))), driverName: col.driver !== undefined ? clean(r.values[col.driver]) : "",
           ref: cellRef, entry: null, tracking: key ? trackByContainer.get(key) || null : null, group: g, vals: r.values, cols: col, compare: tab.compare, cutoffKind: tab.cutoff || null, slipField: tab.slip || null,
           // Planned collection: container pre-filled, no driver on the sheet yet -> no alerts until a driver is added.
           planned: !!(tab.planned && key && col.driver !== undefined && clean(r.values[col.driver]) === "") };
@@ -339,6 +366,7 @@
             const cands = [hit.ref2, hit.ref3, instr && instr.booking].filter(Boolean);
             if (!refMatch(sv, cands)) add("warn", "loadRef", sv, cands.join(" | "), "Load reference differs");
           } else if (f === "vessel") {
+            if (/^\s*N\s*[\/.]?\s*A\.?\s*$/i.test(sv)) continue; // "N/A" on the sheet: no vessel alert
             const cands = [instr && instr.vessel, hit.ref3].filter(Boolean);
             if (!vesselMatch(sv, cands)) add("warn", "vessel", sv, cands.join(" | "), "Vessel differs");
           } else if (f === "customer") {
@@ -351,11 +379,9 @@
           } else if (f === "driver") {
             const nt = tokens(hit.driver, 3);
             if (!nt.length) continue;
-            const st = tokens(sv, 3);
             const inRow = nt.slice(0, 2).some((t) => rowText.has(t));
-            if (st.length) {
-              const ok = st.some((t) => nt.includes(t) || nt.some((n) => n.startsWith(t) || t.startsWith(n))) || inRow;
-              if (!ok) add("warn", "driver", sv, hit.driver, "Driver differs");
+            if (clean(sv)) {
+              if (!driverMatch(sv, hit.driver) && !inRow) add("warn", "driver", sv, hit.driver, "Driver differs");
             } else if (!inRow) {
               add("info", "driver", "", hit.driver, "Driver not on sheet");
             }
@@ -420,7 +446,7 @@
       if (tk && !/^PENDING/.test(tk) && rowRecs.some((r) => r.key === tk)) continue;
       const dt = tokens(t.driver, 3).slice(0, 2);
       if (!dt.length) continue;
-      const cands = rowRecs.filter((r) => r.base === b && !r.tracking && dt.some((d) => r.tokens.has(d)));
+      const cands = rowRecs.filter((r) => r.base === b && !r.tracking && (dt.some((d) => r.tokens.has(d)) || (r.driverName && driverMatch(r.driverName, t.driver))));
       // Prefer planned slots without a container, then rows whose Nexl container has no driver match yet.
       const pick = cands.find((r) => !r.key) || cands[0];
       if (pick) { pick.tracking = t; usedTrack.add(t); if (pick.entry) pick.entry.tracking = t; }
@@ -453,7 +479,7 @@
           if (!claimed.has(n || tc)) return { value: n ? n.container : r.tracking.container, n, key: tc, source: "tracking" };
         }
       }
-      const byDriver = pool.filter((n) => tokens(n.driver, 3).slice(0, 2).some((t) => r.tokens.has(t)));
+      const byDriver = pool.filter((n) => tokens(n.driver, 3).slice(0, 2).some((t) => r.tokens.has(t)) || (r.driverName && driverMatch(r.driverName, n.driver)));
       if (byDriver.length === 1) return { value: byDriver[0].container, n: byDriver[0], source: "driver" };
       if (pool.length === 1 && slotsByBase.get(r.base) === 1 && !tokens(pool[0].driver, 3).length) return { value: pool[0].container, n: pool[0], source: "only" };
       return null;
@@ -934,5 +960,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, linkInstructions, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
+  root.NexlMatcher = { compare, linkInstructions, driverMatch, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);
