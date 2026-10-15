@@ -95,6 +95,7 @@ window.NEXL_CONFIG = {
     },
     {
       name: "IMPORTS P.E",
+      linkBy: "booking", // REFERENCE column = Nexl Booking Reference: links rows without an instruction number
       slip: "comment", // port slip on an import = container COLLECTED from the port
       planned: true, // container filled in but no DRIVER yet = planned collection: no alerts until a driver is added
       compare: ["vessel", "driver", "customer"],
