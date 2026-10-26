@@ -356,6 +356,24 @@
         // Container on another leg of the same instruction -> error with the leg Nexl has (fix in Instruction tab).
         const legNo = (n) => +(String(n.instruction).split(".")[1] || 0);
         const hit = hits.find((n) => n.instruction === id && !n.used) || hits.find((n) => n.instruction === id);
+        // The sheet's own leg in Nexl: real containers vs PENDING slots (driver hasn't captured the container yet)
+        const ownLeg = pool.filter((n) => n.instruction === id);
+        const ownReal = ownLeg.filter((n) => n.key && !/^PENDING/.test(n.key));
+        const ownPend = ownLeg.filter((n) => !n.key || /^PENDING/.test(n.key));
+        const pendTrack = (nexl.tracking || []).filter((t) => normInstr(t.instruction) === id && (!compact(t.container) || /^PENDING/.test(compact(t.container))));
+        const pendDriver = (ownPend.find((n) => clean(n.driver)) || {}).driver || (pendTrack[0] || {}).driver || "";
+        const allocMin = pendTrack.length ? Math.min(...pendTrack.map((t) => durMin(t.jobDuration) ?? Infinity)) : null;
+        if (!hit && hits.length && ownLeg.length && !ownReal.length && ownPend.length) {
+          // e.g. PLUGGED IN 87815.02 with the same container as 87815.01: .02 just isn't captured yet. Not an error;
+          // "allocated but not started" comes from Driver Tracking as usual.
+          continue;
+        }
+        if (!hit && hits.length && ownReal.length) {
+          // this leg has a different real container in Nexl -> always an error
+          add("error", "container", cont, ownReal.map((n) => n.container).join(" | "), `Container differs: Nexl ${id} has ${ownReal.map((n) => n.container).join(", ")}`);
+          stats.mismatched++;
+          continue;
+        }
         if (!hit && hits.length) {
           const byLeg = [...hits].sort((x, y) => legNo(x) - legNo(y));
           if (/PLUGGED|GROUNDED/i.test(tab.name)) byLeg.reverse();
@@ -371,6 +389,16 @@
           if ((instrById.get(id) || instrById.get(b) || {}).state === "Planned" && !pool.some((n) => n.key && !/^PENDING/.test(n.key)) && !(nexlByContainer.get(key) || []).length) continue;
           const elsewhere = (nexlByContainer.get(key) || [])[0];
           const searched = search[key];
+          if (!elsewhere && !(searched && searched.length) && ownPend.length && !ownReal.length) {
+            // Not in Nexl yet, and this leg only has PENDING slots: driver allocated -> 15 min to capture it in the app;
+            // not allocated yet -> nothing to flag.
+            if (!clean(pendDriver)) continue;
+            if (allocMin == null || allocMin < 15) continue;
+            add("error", "container", cont, "", `Not captured in Nexl yet: ${String(pendDriver).split(" ").slice(0, 2).join(" ")} was allocated ${fmtMin(allocMin)} ago`);
+            entry.notInNexl = true;
+            stats.notInNexl++;
+            continue;
+          }
           if (elsewhere) {
             add("error", "instruction", id, elsewhere.instruction, `Nexl has this container on instruction ${elsewhere.instruction}`);
           } else if (searched && searched.length) {
