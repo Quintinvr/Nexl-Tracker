@@ -402,6 +402,11 @@
             stats.notInNexl++;
             continue;
           }
+          // IMPORTS: the container is only expected in Nexl once its port booking time has passed.
+          if (!elsewhere && tab.waitFor && col[tab.waitFor] !== undefined) {
+            const bt = bookingTime(r.values[col[tab.waitFor]], now);
+            if (!bt || now < bt) continue; // not booked yet, or booking still to come
+          }
           if (elsewhere) {
             add("error", "instruction", id, elsewhere.instruction, `Nexl has this container on instruction ${elsewhere.instruction}`);
           } else if (searched && searched.length) {
@@ -731,6 +736,31 @@
   }
 
   /** "202:20:44" -> minutes */
+  /** PORT BOOKINGS cell -> Date. Excel date/time numbers, "14:00", "26/10 14:00", "26 Oct 08:00-10:00" (slot start).
+   *  Time only = today. Blank / TBA / anything without a time or date = null (not booked). */
+  function bookingTime(v, now) {
+    now = now || new Date();
+    if (v == null || v === "") return null;
+    if (typeof v === "number" && isFinite(v)) {
+      if (v >= 1) { const d = new Date(Math.round((v - 25569) * 86400000)); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes()); }
+      const m = Math.round(v * 1440); return new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(m / 60), m % 60);
+    }
+    const s = String(v).trim().toUpperCase();
+    if (!s || /^(TBA|TBC|N\/?A|NO|NONE|-)$/.test(s)) return null;
+    const MON = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+    let y = now.getFullYear(), mo = null, d = null;
+    let m = /(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})/.exec(s);
+    if (m) { y = +m[1]; mo = +m[2] - 1; d = +m[3]; }
+    else if ((m = /\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*/.exec(s))) { d = +m[1]; mo = MON[m[2]]; }
+    else if ((m = /(?<![:\d])(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?(?![:\d])/.exec(s))) { d = +m[1]; mo = +m[2] - 1; if (m[3]) y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; }
+    const rest = m ? s.replace(m[0], " ") : s;
+    const t = /\b(\d{1,2})[:H.](\d{2})\b/.exec(rest) || /\b(\d{2})(\d{2})\b/.exec(rest);
+    if (mo == null && !t) return null;
+    const hh = t ? +t[1] : 0, mm = t ? +t[2] : 0;
+    if (hh > 23 || mm > 59) return null;
+    return mo == null ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm) : new Date(y, mo, d, hh, mm);
+  }
+
   function durMin(s) {
     const m = /^(\d+):(\d{2})(?::(\d{2}))?$/.exec(String(s || "").trim());
     return m ? +m[1] * 60 + +m[2] : null;
@@ -1052,5 +1082,5 @@
     return n - 1;
   }
 
-  root.NexlMatcher = { compare, linkInstructions, driverMatch, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
+  root.NexlMatcher = { compare, linkInstructions, driverMatch, bookingTime, detectColumns, colLetter, letterToIndex, compact, tokens, nameMatch, refMatch, vesselMatch, legStatus, parseRoute, durMin, fmtMin, issueKey, issueFp, instrKey, instrFp, cutoffLabel, shortIssue, parseStackDates, parseTransporters, cellDate };
 })(typeof window !== "undefined" ? window : globalThis);

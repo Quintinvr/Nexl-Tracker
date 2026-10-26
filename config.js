@@ -43,6 +43,7 @@ window.NEXL_CONFIG = {
     seal:        [/^SEAL( NO\.?)?$/i],
     booking:     [/^BOOKING (REF|NO\.?|REFERENCE)$/i, /^REFERENCE$/i],
     loadRef:     [/^LOAD REF$/i],
+    portBooking: [/^PORT BOOKINGS?$/i, /^PORT BOOKING TIME$/i],
     vessel:      [/^VESSEL$/i],
     transporter: [/^TRANSPORTER$/i],
     driver:      [/^DRIVER( NAME)?$/i],
@@ -96,6 +97,7 @@ window.NEXL_CONFIG = {
     {
       name: "IMPORTS P.E",
       linkBy: "booking", // REFERENCE column = Nexl Booking Reference: links rows without an instruction number
+      waitFor: "portBooking", // "container not in Nexl" only once the PORT BOOKINGS time has passed (blank = not booked yet)
       slip: "comment", // port slip on an import = container COLLECTED from the port
       planned: true, // container filled in but no DRIVER yet = planned collection: no alerts until a driver is added
       compare: ["vessel", "driver", "customer"],

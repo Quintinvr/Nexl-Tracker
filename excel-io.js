@@ -72,7 +72,7 @@
         if (loaded.length) await ctx.sync();
         const rows = [];
         for (const { b, rng } of loaded) rng.values.forEach((vals, i) => rows.push({ row: b.start + i + 1, values: vals }));
-        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, planned: !!tab.planned, linkBy: keyField, cols, rows, refRows });
+        out.push({ name: tab.name, compare: tab.compare, cutoff: tab.cutoff || null, slip: tab.slip || null, planned: !!tab.planned, linkBy: keyField, waitFor: tab.waitFor || null, cols, rows, refRows });
       }
       return out;
     });
