@@ -363,9 +363,12 @@
         const pendTrack = (nexl.tracking || []).filter((t) => normInstr(t.instruction) === id && (!compact(t.container) || /^PENDING/.test(compact(t.container))));
         const pendDriver = (ownPend.find((n) => clean(n.driver)) || {}).driver || (pendTrack[0] || {}).driver || "";
         const allocMin = pendTrack.length ? Math.min(...pendTrack.map((t) => durMin(t.jobDuration) ?? Infinity)) : null;
-        if (!hit && hits.length && ownLeg.length && !ownReal.length && ownPend.length) {
-          // e.g. PLUGGED IN 87815.02 with the same container as 87815.01: .02 just isn't captured yet. Not an error;
-          // "allocated but not started" comes from Driver Tracking as usual.
+        // The sheet's leg exists in Nexl (listed, planned or its container list was read) even with no container rows
+        const ownKnown = instrById.has(id) || Object.prototype.hasOwnProperty.call(nexl.containers || {}, id) || (nexl.planning || []).some((p) => p.id === id);
+        const sheetLeg = +(String(id).split(".")[1] || 0);
+        if (!hit && hits.length && !ownReal.length && (ownKnown || ownPend.length || (/PLUGGED|GROUNDED/i.test(tab.name) && hits.every((n) => legNo(n) < sheetLeg)))) {
+          // e.g. PLUGGED IN 87815.02 with the same container as 87815.01: .02 isn't captured yet (PENDING, on hold or
+          // no container rows). Not an error; "allocated but not started" comes from Driver Tracking as usual.
           continue;
         }
         if (!hit && hits.length && ownReal.length) {
