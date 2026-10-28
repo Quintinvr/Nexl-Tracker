@@ -89,7 +89,6 @@ window.NEXL_CONFIG = {
       name: "EXPORTS P.E",
       linkBy: "booking", // no LOAD REF column: instruction numbers are linked through BOOKING NO. (Nexl Booking Reference)
       cutoff: "auto", // reefer cutoff when EQUIPMENT says RH/reefer, otherwise dry
-      slip: "seal", // this tab writes STACKED in the SEAL column
       planned: true, // container filled in but no DRIVER yet = planned collection: no alerts until a driver is added
       // The SEAL column on this tab holds stack status / appointment times, so seal is not compared.
       compare: ["booking", "vessel", "driver", "customer"],
@@ -98,7 +97,6 @@ window.NEXL_CONFIG = {
       name: "IMPORTS P.E",
       linkBy: "booking", // REFERENCE column = Nexl Booking Reference: links rows without an instruction number
       waitFor: "portBooking", // "container not in Nexl" only once the PORT BOOKINGS time has passed (blank = not booked yet)
-      slip: "comment", // port slip on an import = container COLLECTED from the port
       planned: true, // container filled in but no DRIVER yet = planned collection: no alerts until a driver is added
       compare: ["vessel", "driver", "customer"],
     },
