@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.7.2";
+  const VERSION = "2.7.3";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -152,7 +152,7 @@
       // Instruction numbers: look up load refs Nexl hasn't told us about yet (Reference 2), cached on this PC.
       nexl.refSearch = refCacheGet();
       res = NexlMatcher.compare(usable, nexl, matchOpts());
-      const ask = (res.instrLinks ? res.instrLinks.toSearch : []).slice(0, 40);
+      const ask = (res.instrLinks ? res.instrLinks.toSearch : []).filter((r) => !NexlClient.searchable || NexlClient.searchable(r)).slice(0, 40);
       if (ask.length) {
         progress(0.92, `Looking up ${ask.length} load ref(s) in Nexl…`);
         const found = await NexlClient.searchRefs(ask).catch(() => ({}));
@@ -399,12 +399,14 @@
   function refCacheRaw() { try { return JSON.parse(localStorage.getItem(REF_KEY) || "{}"); } catch (e) { return {}; } }
   function refCacheGet() {
     const now = Date.now(), out = {};
-    for (const [k, v] of Object.entries(refCacheRaw())) if (v && now - v.at < (v.hits.length ? 7 * 864e5 : 30 * 60000)) out[k] = v.hits;
+    // found: 7 days · not in Nexl: 30 min · Nexl didn't answer in time: 6 h (so one slow ref can't hold up every sync)
+    for (const [k, v] of Object.entries(refCacheRaw())) if (v && now - v.at < (v.hits.length ? 7 * 864e5 : v.failed ? 6 * 36e5 : 30 * 60000)) out[k] = v.hits;
     return out;
   }
   function refCachePut(found) {
     const c = refCacheRaw(), now = Date.now();
     for (const [k, hits] of Object.entries(found || {})) c[k] = { at: now, hits: (hits || []).map((h) => ({ instruction: h.instruction, customer: h.customer, vessel: h.vessel, booking: h.booking, status: h.status })) };
+    for (const k of (found && found.__failed) || []) c[k] = { at: now, hits: [], failed: true };
     const keys = Object.keys(c);
     if (keys.length > 3000) keys.sort((a, b) => c[a].at - c[b].at).slice(0, keys.length - 3000).forEach((k) => delete c[k]);
     try { localStorage.setItem(REF_KEY, JSON.stringify(c)); } catch (e) { /* storage off: look up again next time */ }

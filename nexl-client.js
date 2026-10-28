@@ -43,8 +43,8 @@
     constructor(code, detail) { super(detail || code); this.code = code; }
   }
 
-  async function get(path) {
-    const r = await send("fetch", path);
+  async function get(path, timeoutMs) {
+    const r = await send("fetch", path, timeoutMs || 45000);
     if (!r.ok) throw new NexlError(r.error || "FAILED", r.detail);
     return r.text;
   }
@@ -116,15 +116,26 @@
   /** Nexl's reference search for load refs -> {ref: [{instruction, customer, vessel, booking, status}]}.
    *  Nexl matches PART of a word ("26402768" also finds booking 264027688), so a hit only counts when the
    *  ref is exactly in its Booking Reference, or exactly in Reference 2 / 3 of one of its containers. */
+  /** True when a ref is specific enough to look up (Nexl's search matches PART of a word, so short ones are slow and noisy). */
+  function searchable(ref) {
+    const k = String(ref == null ? "" : ref).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (k.length < 5) return false;
+    if (/^\d+$/.test(k) && k.length < 6) return false;
+    if (/^(.)\1+$/.test(k)) return false; // 00000, XXXXX
+    return true;
+  }
+  /** Returns {ref: hits[]} for refs answered, plus out.__failed = refs Nexl didn't answer in time (so they aren't
+   *  retried on every sync). Each request gives up after 15 s; the whole lookup stops starting new refs after 25 s. */
   async function searchRefs(list) {
-    const out = {};
+    const out = {}, failed = [];
     const key = (v) => String(v == null ? "" : v).toUpperCase().replace(/[^A-Z0-9]/g, "");
     const has = (vals, k) => vals.some((v) => P.expandRef(v).some((x) => key(x) === k));
-    await pool(list, 3, async (ref) => {
+    const t0 = Date.now(), PER = 15000, BUDGET = 25000;
+    await pool(list.filter(searchable), 2, async (ref) => {
+      if (Date.now() - t0 > BUDGET - PER) return; // not enough time left: the next sync carries on
       const word = String(ref).trim(), k = key(word);
-      if (k.length < 4) return;
       try {
-        const hits = (P.parseSearch(await get(`/php/ajax/search/get.search.php?p_filter=reference&p_word=${encodeURIComponent(word)}`)) || [])
+        const hits = (P.parseSearch(await get(`/php/ajax/search/get.search.php?p_filter=reference&p_word=${encodeURIComponent(word)}`, PER)) || [])
           .filter((x) => x.instruction && !/deleted/i.test(x.status || ""));
         const seen = new Set(), ok = [];
         for (const h of hits) {
@@ -132,13 +143,17 @@
           if (seen.has(b)) continue;
           seen.add(b);
           if (has(String(h.booking || "").split(" / "), k)) { ok.push(h); continue; }
-          if (seen.size > 4) continue; // don't open too many
-          const cons = P.parseContainers(await get(`/php/ajax/instruction_containers/get.containers.fresh.php?p_id=${encodeURIComponent(h.instruction.includes(".") ? h.instruction : h.instruction + ".00")}`), h.instruction) || [];
+          if (seen.size > 4 || Date.now() - t0 > BUDGET) continue; // don't open too many
+          const cons = P.parseContainers(await get(`/php/ajax/instruction_containers/get.containers.fresh.php?p_id=${encodeURIComponent(h.instruction.includes(".") ? h.instruction : h.instruction + ".00")}`, PER), h.instruction) || [];
           if (cons.some((c) => has([c.ref2, c.ref3], k))) ok.push(h);
         }
         out[ref] = ok;
-      } catch (e) { if (e.code === "NOT_LOGGED_IN") throw e; if (e.code === "NOT_ALLOWED") refBlocked = true; }
+      } catch (e) {
+        if (e.code === "NOT_LOGGED_IN") throw e;
+        if (e.code === "NOT_ALLOWED") refBlocked = true; else failed.push(ref);
+      }
     });
+    Object.defineProperty(out, "__failed", { value: failed, enumerable: false });
     return out;
   }
   let refBlocked = false;
@@ -155,5 +170,5 @@
     return r.dataUrl;
   }
 
-  root.NexlClient = { getPlanning, get planBlocked() { return planBlocked; }, ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, searchRefs, NexlError, get bridgeVersion() { return bridgeVersion; }, get refBlocked() { return refBlocked; } };
+  root.NexlClient = { getPlanning, get planBlocked() { return planBlocked; }, ping, getUploads, getImage, openInNexl, getInstructions, getContainers, getTracking, searchContainers, searchRefs, searchable, NexlError, get bridgeVersion() { return bridgeVersion; }, get refBlocked() { return refBlocked; } };
 })(window);
