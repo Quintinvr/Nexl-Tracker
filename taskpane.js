@@ -4,19 +4,25 @@
 (function () {
   "use strict";
   const CFG = window.NEXL_CONFIG;
-  const VERSION = "2.7.5";
+  const VERSION = "2.8.0";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- settings (per user, this browser) ----------
   const SKEY = "nexlcheck.settings.v1";
   const defaults = { auto: true, minutes: CFG.refreshMinutes, writeTab: true, writeInfo: false, region: CFG.region, disabledTabs: [],
-    statusCols: true, notes: true, notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpen: true, popUp: true, waDrvSheet: "", waDrvFieldsBy: {},
+    statusCols: true, notes: false, fixedWriter: false, pcId: "", notStarted: CFG.notStartedMinutes, stuck: CFG.stuckMinutes, name: "", snoozeMin: 60, splash: true, autoOpen: true, popUp: true, waDrvSheet: "", waDrvFieldsBy: {},
     cutoffH: CFG.cutoffWarnHours, silent: CFG.pingSilentMinutes,
     waEmoji: true, waFields: { container: false, seal: false, tare: false, booking: false } };
   let settings = { ...defaults };
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch (e) { /* storage unavailable */ }
   const saveSettings = () => { try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
+  // One-time move to 2.8: cell notes off by default (NEXL ALERT shows the same), and a stable id for this PC.
+  let cleanOldNotes = false;
+  if (!settings.v28) { if (settings.notes) cleanOldNotes = true; settings.notes = false; settings.v28 = true; }
+  if (!settings.pcId) settings.pcId = "pc_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  saveSettings();
+  const SHEET_WRITE_MIN = 15; // the sheet is updated at most every 15 min (the panel itself refreshes every few minutes)
 
   // ---------- state ----------
   const state = { panelId: Math.random().toString(36).slice(2) + Date.now().toString(36), isWriter: false, writerName: "", busy: false, result: null, lastSyncAt: 0, firstSeen: new Map(), view: "now", input: null, acks: {}, selected: null, fillSel: new Set(), photo: new Map(), slips: {}, sealOk: new Set(),
@@ -96,7 +102,8 @@
       extras: state.extras, cutoffWarnHours: settings.cutoffH, pingSilentMinutes: settings.silent, slips: state.slips, legHistory: loadLegs() };
   }
 
-  async function sync() {
+  async function sync(ev) {
+    const forced = !!(ev && ev.type === "click"); // "Sync now" always writes to the sheet
     if (state.busy) return;
     state.busy = true;
     $("syncBtn").disabled = true;
@@ -177,10 +184,16 @@
       rememberLegs(res.legSamples);
 
       // Only ONE panel writes to the workbook (see ExcelIO.claimWriter); everyone else just reads.
-      const w = await ExcelIO.claimWriter(state.panelId, settings.name || "a team member").catch(() => ({ isWriter: false, holder: "?" }));
+      const w = await ExcelIO.claimWriter(state.panelId, settings.name || "a team member", { pcId: settings.pcId, fixed: settings.fixedWriter }).catch(() => ({ isWriter: false, holder: "?" }));
+      const newlyWriter = w.isWriter && !state.isWriter;
       state.isWriter = w.isWriter; state.writerName = w.holder;
       showWriter();
       if (!state.isWriter) { if (tabWarnings.length) banner(tabWarnings.join("<br>"), "warn"); return; }
+      if (!state.legacyCleaned) { state.legacyCleaned = true; ExcelIO.removeLegacySheets().catch(() => {}); }
+      // Batch sheet updates: at most every 15 min, unless "Sync now" was pressed or this panel just became the writer.
+      const due = forced || newlyWriter || !state.lastSheetWriteAt || Date.now() - state.lastSheetWriteAt >= SHEET_WRITE_MIN * 60000;
+      if (!due) { if (tabWarnings.length) banner(tabWarnings.join("<br>"), "warn"); return; }
+      state.lastSheetWriteAt = Date.now();
 
       if (settings.writeTab) {
         progress(0.96, `Updating ${CFG.checkTabName} tab…`);
@@ -190,6 +203,11 @@
         } catch (e) { tabWarnings.push(`Couldn't update the ${esc(CFG.checkTabName)} tab (${esc(e.message)}). The panel is still up to date.`); }
       }
       await writeColumns(tabWarnings);
+      if (!settings.notes && cleanOldNotes) { // notes switched off: remove the ones Nexl Check added before (once)
+        cleanOldNotes = false;
+        progress(0.98, "Removing old Nexl Check cell notes…");
+        try { await ExcelIO.syncNotes(CFG, [], fmtTime(now)); } catch (e) { /* not critical */ }
+      }
       if (settings.notes) {
         progress(0.98, "Updating cell notes…");
         try {
@@ -213,7 +231,7 @@
     const el = $("writerPill"); if (!el) return;
     el.hidden = false;
     el.textContent = state.isWriter ? "✍ updates the sheet" : `📖 read-only`;
-    el.title = state.isWriter ? "This panel writes NEXL STEP / NEXL ALERT, notes and the NEXL CHECK tab for the whole team."
+    el.title = state.isWriter ? `This panel writes NEXL STEP / NEXL ALERT and the NEXL CHECK tab for the whole team (at most every ${SHEET_WRITE_MIN} min, or when you press Sync now).`
       : `${state.writerName || "Another panel"} writes the sheet. This panel only reads, so Excel isn't overloaded.`;
   }
   async function writeColumns(warnings) {
@@ -1177,6 +1195,8 @@
     bind("sSnoozeMin", "snoozeMin", "value", (v) => Math.max(10, Math.min(480, +v || 60)));
     bind("sStatusCols", "statusCols");
     bind("sNotes", "notes");
+    bind("sFixedWriter", "fixedWriter");
+    $("sFixedWriter").addEventListener("change", () => toast($("sFixedWriter").checked ? "This PC will be the only one that updates the sheet (from the next sync)." : "Any open panel can update the sheet again (one at a time)."));
     bind("sWriteTab", "writeTab");
     bind("sWriteInfo", "writeInfo");
     bind("sNotStarted", "notStarted", "value", (v) => Math.max(5, +v || CFG.notStartedMinutes));

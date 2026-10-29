@@ -402,8 +402,10 @@
             // Not in Nexl yet, and this leg only has PENDING slots: driver allocated -> 15 min to capture it in the app;
             // not allocated yet -> nothing to flag.
             if (!clean(pendDriver)) continue;
-            if (allocMin == null || allocMin < 15) continue;
+            if (allocMin == null || !isFinite(allocMin) || allocMin < 15) continue;
             add("error", "container", cont, "", `Not captured in Nexl yet: ${String(pendDriver).split(" ").slice(0, 2).join(" ")} was allocated ${fmtMin(allocMin)} ago`);
+            Object.assign(entry.issues[entry.issues.length - 1], { sheetShort: "⛔ Not captured in Nexl",
+              sheetText: `Not captured in Nexl yet: ${String(pendDriver).split(" ").slice(0, 2).join(" ")} was allocated${isFinite(allocMin) ? " at " + dayHm(new Date(Math.round((now - allocMin * 60000) / 300000) * 300000)) : ""}` });
             entry.notInNexl = true;
             stats.notInNexl++;
             continue;
@@ -590,6 +592,7 @@
       const progressIssues = [];
       for (const a of ls.alerts) {
         const iss = { severity: a.severity || "warn", field: "progress", code: a.code, short: a.short, sheet: "", nexl: ls.step, message: a.text, instruction: r.id,
+          sheetShort: a.sheetShort || "", sheetText: a.sheetText || "", sheetNexl: ls.sheetShort || ls.short || "",
           container: r.container || (r.tracking ? "(" + r.tracking.driver.split(" ")[0] + ")" : ""), ref: anchor };
         issues.push(iss);
         progressIssues.push(iss);
@@ -651,7 +654,7 @@
         for (const i of (r.entry ? r.entry.issues : []).concat(progressIssues)) muted.add(i);
         if (r.entry) r.entry.issues = [];
         const live = ls.stage === "moving" || ls.stage === "allocated";
-        rowStatus.push({ tab: r.tab, row: r.row, id: r.id, step: live ? ls.short : "📋 Planned · no driver yet", alert: "", level: "" });
+        rowStatus.push({ tab: r.tab, row: r.row, id: r.id, step: live ? (ls.sheetShort || ls.short) : "📋 Planned · no driver yet", alert: "", level: "" });
         rows[rk] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
           nexl: n, tracking: r.tracking, leg: ls, issues: [], fills: rowFills, ref: anchor, slip: slips[rk] || null, cutoff: r.cutoff || null, planned: true };
         stats.planned = (stats.planned || 0) + 1;
@@ -664,10 +667,10 @@
         const ak = ackFor(i, acks, nowMs);
         if (ak) {
           i.ack = ak; i.bypass = ak.kind === "bypass";
-          return i.bypass ? `✔ ${ak.by} bypassed: ${i.short || shortIssue(i)}` : `👀 ${ak.by}: ${i.short || shortIssue(i)}`;
+          return i.bypass ? `✔ ${ak.by} bypassed: ${i.sheetShort || i.short || shortIssue(i)}` : `👀 ${ak.by}: ${i.sheetShort || i.short || shortIssue(i)}`;
         }
         open++;
-        return i.short || shortIssue(i);
+        return i.sheetShort || i.short || shortIssue(i); // sheet text: no running timers
       });
       let level = "";
       if (rowIssues.some((i) => i.severity === "error" && !i.ack)) level = "error";
@@ -675,7 +678,7 @@
       else if (rowIssues.some((i) => i.ack && !i.bypass)) level = "ack";
       else if (parts.length) level = "ok"; // everything on the row was bypassed
       else if (n || r.tracking) level = "ok";
-      rowStatus.push({ tab: r.tab, row: r.row, id: r.id, step: ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
+      rowStatus.push({ tab: r.tab, row: r.row, id: r.id, step: ls.sheetShort || ls.short, alert: parts.length ? parts.join(" | ") : level === "ok" ? "✓" : "", level });
       rows[r.tab + "|" + r.row] = { tab: r.tab, row: r.row, id: r.id, container: r.container, instr: (n && instrById.get(n.instruction)) || instrById.get(r.id) || (r.group.nexl[0] || null),
         nexl: n, tracking: r.tracking, leg: ls, issues: (r.entry ? r.entry.issues : progressIssues), fills: rowFills, ref: anchor,
         slip: slips[rk] || null, cutoff: r.cutoff || null };
@@ -828,8 +831,12 @@
       if (last < 0) {
         const jm = durMin(t.jobDuration);
         const step = `Allocated to ${who}${jm != null ? " " + fmtMin(jm) + " ago" : ""} · not started · first stop: ${stops[0] ? stops[0].name : "?"}`;
-        if (jm != null && jm >= notStartedMin) alerts.push({ code: "notstarted", text: `Not started: allocated to ${who} ${fmtMin(jm)} ago, no pick-up yet`, short: `⏰ Not started ${fmtMin(jm)}` });
-        return { step, short: `⏳ Allocated · ${first}${jm != null ? " · " + fmtMin(jm) : ""}`, alerts, stage: "allocated", stops: stopList, who, remaining: Math.max(stops.length - 1, 1), lastAt: null };
+        // Sheet text uses the allocation clock time (rounded to 5 min) so the cell doesn't change on every sync.
+        const allocAt = jm != null ? new Date(Math.round((now - jm * 60000) / 300000) * 300000) : null;
+        if (jm != null && jm >= notStartedMin) alerts.push({ code: "notstarted", text: `Not started: allocated to ${who} ${fmtMin(jm)} ago, no pick-up yet`, short: `⏰ Not started ${fmtMin(jm)}`,
+          sheetText: `Not started: allocated to ${who} at ${dayHm(allocAt)}, no pick-up yet`, sheetShort: `⏰ Not started · allocated ${dayHm(allocAt)}` });
+        return { step, short: `⏳ Allocated · ${first}${jm != null ? " · " + fmtMin(jm) : ""}`, sheetShort: `⏳ Allocated · ${first}${allocAt ? " · " + dayHm(allocAt) : ""}`,
+          alerts, stage: "allocated", stops: stopList, who, remaining: Math.max(stops.length - 1, 1), lastAt: null };
       }
       const at = stops[last], when = times[last];
       if (at.role === "POD" || last === stops.length - 1) {
@@ -841,7 +848,8 @@
       const ageMin = (now - when) / 60000;
       const step = `Leg ${last + 1}/${legs}: ${at.name} (${hhmm(when)}) → ${next ? next.name : "?"} · ${who}`;
       if (ageMin >= stuckMin) alerts.push({ code: "stuck", text: `Stuck: at ${at.name} since ${hhmm(when)} (${fmtMin(ageMin)}), not at ${next ? next.name : "next stop"} yet`,
-        short: `🛑 Stuck at ${shortName(at.name)} ${fmtMin(ageMin)}` });
+        short: `🛑 Stuck at ${shortName(at.name)} ${fmtMin(ageMin)}`,
+        sheetText: `Stuck: at ${at.name} since ${dayHm(when)}, not at ${next ? next.name : "next stop"} yet`, sheetShort: `🛑 Stuck at ${shortName(at.name)} since ${dayHm(when)}` });
       return { step, short: `🚚 ${last + 1}/${legs} → ${shortName(next ? next.name : "?")} · ${first}`, alerts, stage: "moving", stops: stopList, who,
         remaining: stops.length - 1 - last, lastAt: when, nextName: next ? next.name : "" };
     }
@@ -993,11 +1001,13 @@
           const lateBy = fmtMin((eta - cut) / 60000);
           out.push({ code: "late", severity: "error",
             text: `Likely to MISS ${v.vessel} ${kind} cutoff (${v.terminal} ${dayHm(cut)}): ${ls.stage === "moving" ? "truck " + ls.remaining + " stop(s) from port" : ls.stage === "allocated" ? "truck not started yet" : "no truck on it yet"}, ${etaTxt} (${lateBy} late)`,
-            short: `🚨 Will miss cutoff: ${etaTxt} vs ${hhmm(cut)}` });
+            short: `🚨 Will miss cutoff: ${etaTxt} vs ${hhmm(cut)}`,
+            sheetText: `Likely to MISS ${v.vessel} ${kind} cutoff (${v.terminal} ${dayHm(cut)})`, sheetShort: `🚨 Will miss cutoff ${dayHm(cut)}` });
         }
         else if (h < 0 && h > -24) out.push({ code: "cutoff", severity: "error", text: `Missed ${kind} cutoff for ${v.vessel} (${v.terminal} ${dayHm(cut)}) and not delivered`, short: `⚓ Cutoff missed ${dayHm(cut)}` });
         else if (h >= 0 && h <= X.cutoffWarnH) out.push({ code: "cutoff", severity: h <= X.cutoffRedH ? "error" : "warn",
-          text: `${v.vessel} ${kind} cutoff in ${fmtMin(h * 60)} (${v.terminal} ${dayHm(cut)}), container not at port yet${eta ? ` · ${etaTxt}, should make it` : ""}`, short: `⚓ Cutoff in ${fmtMin(h * 60)}${eta ? " · ETA " + hhmm(eta) + " ✓" : ""}` });
+          text: `${v.vessel} ${kind} cutoff in ${fmtMin(h * 60)} (${v.terminal} ${dayHm(cut)}), container not at port yet${eta ? ` · ${etaTxt}, should make it` : ""}`, short: `⚓ Cutoff in ${fmtMin(h * 60)}${eta ? " · ETA " + hhmm(eta) + " ✓" : ""}`,
+          sheetText: `${v.vessel} ${kind} cutoff ${dayHm(cut)} (${v.terminal}), container not at port yet${eta ? ", on track" : ""}`, sheetShort: `⚓ Cutoff ${dayHm(cut)}${eta ? " · on track" : ""}` });
       }
     }
     // 2. Genset mismatch

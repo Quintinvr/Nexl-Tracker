@@ -102,7 +102,9 @@
   }
   async function writeCheckTabOnce(cfg, issues, firstSeen, stamp) {
     const list = issues;
-    const sig = JSON.stringify(list.map((i) => [i.severity, i.ref && i.ref.tab, i.ref && i.ref.row, i.field, i.sheet, i.nexl, i.message]));
+    // Sheet text has no running timers (sheetText / sheetNexl), so the tab is only rewritten when problems change.
+    const msg = (i) => i.sheetText || i.message, nx = (i) => (i.sheetNexl != null && i.field === "progress" ? i.sheetNexl : i.nexl);
+    const sig = JSON.stringify(list.map((i) => [i.severity, i.ref && i.ref.tab, i.ref && i.ref.row, i.field, i.sheet, nx(i), msg(i)]));
     await Excel.run(async (ctx) => {
       let ws = ctx.workbook.worksheets.getItemOrNullObject(cfg.checkTabName);
       await ctx.sync();
@@ -125,7 +127,7 @@
         const vals = list.map((i) => {
           const cell = i.ref ? `${i.ref.col || "A"}${i.ref.row}` : "";
           return [SEV_LABEL[i.severity], i.ref ? i.ref.tab : "", cell, i.instruction, i.container, FIELD_LABEL[i.field] || i.field,
-            i.sheet, i.nexl, i.message, firstSeen(i) || ""].map(safe);
+            i.sheet, nx(i), msg(i), firstSeen(i) || ""].map(safe);
         });
         const n = vals.length;
         ws.getRange(`A4:J${3 + n}`).values = vals;
@@ -185,24 +187,38 @@
   // If it goes quiet for staleMin minutes (closed, PC asleep), the next panel takes over.
   // ---------------------------------------------------------------------------
   const WRITER_SHEET = "NEXL_WRITER";
-  async function claimWriter(id, name, staleMin = 12) {
-    let res = { isWriter: false, holder: "" };
+  // NEXL_WRITER!A1:E1 = [panel id, name, heartbeat, fixed PC id, fixed PC name]
+  // - The writer only refreshes its heartbeat every 10 min (not on every sync); a claim goes stale after 30 min.
+  // - "Fixed writer": one PC can be named in D1/E1. Other panels then stay read-only, unless that PC has been
+  //   silent for 60 min (closed): then the usual first-come rule applies until it's back.
+  async function claimWriter(id, name, opts = {}) {
+    const pcId = opts.pcId || "", wantFixed = !!opts.fixed, STALE = 30 * 60000, BEAT = 10 * 60000, FIXED_GONE = 60 * 60000;
+    let res = { isWriter: false, holder: "" }, wrote = false;
     await Excel.run(async (ctx) => {
       let ws = ctx.workbook.worksheets.getItemOrNullObject(WRITER_SHEET);
       await ctx.sync();
-      let cur = ["", "", ""];
+      let cur = ["", "", "", "", ""];
       if (!ws.isNullObject) {
-        const r = ws.getRange("A1:C1"); r.load("values"); await ctx.sync();
+        const r = ws.getRange("A1:E1"); r.load("values"); await ctx.sync();
         cur = r.values[0].map((v) => String(v || ""));
       }
-      const fresh = cur[0] && Date.now() - Date.parse(cur[2] || 0) < staleMin * 60000;
-      if (fresh && cur[0] !== id) { res = { isWriter: false, holder: cur[1] || "another PC" }; return; }
+      const age = cur[2] ? Date.now() - Date.parse(cur[2]) : Infinity;
+      const fresh = !!cur[0] && age < STALE;
+      let fixedPc = cur[3], fixedName = cur[4];
+      if (wantFixed && pcId) { fixedPc = pcId; fixedName = name || ""; }
+      else if (!wantFixed && fixedPc && fixedPc === pcId) { fixedPc = ""; fixedName = ""; } // this PC un-ticked it
+      const otherFixed = fixedPc && fixedPc !== pcId;
+      if (otherFixed && age < FIXED_GONE) { res = { isWriter: false, holder: fixedName || cur[1] || "another PC" }; return; }
+      if (!otherFixed && !wantFixed && fresh && cur[0] !== id) { res = { isWriter: false, holder: cur[1] || "another PC" }; return; }
+      const fixedChanged = fixedPc !== cur[3] || fixedName !== cur[4];
+      if (cur[0] === id && age < BEAT && !fixedChanged) { res = { isWriter: true, holder: name || "" }; return; } // still ours: no write
       if (ws.isNullObject) { ws = ctx.workbook.worksheets.add(WRITER_SHEET); ws.visibility = "Hidden"; }
-      ws.getRange("A1:C1").values = [[id, name || "", new Date().toISOString()]];
+      ws.getRange("A1:E1").values = [[id, name || "", new Date().toISOString(), fixedPc, fixedName]];
       await ctx.sync();
+      wrote = cur[0] !== id; // a new claim: check for a simultaneous one below
       res = { isWriter: true, holder: name || "" };
     });
-    if (!res.isWriter) return res;
+    if (!res.isWriter || !wrote) return res;
     // Two panels may have claimed at the same moment: wait a little, re-read, the one that's left wins.
     await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1500));
     await Excel.run(async (ctx) => {
@@ -211,6 +227,24 @@
     });
     return res;
   }
+
+  /** Remove helper sheets older versions created and nothing uses any more (NEXL_GROUPS, WhatsApp groups, until 2.4). */
+  async function removeLegacySheets() {
+    let removed = [];
+    await Excel.run(async (ctx) => {
+      for (const n of ["NEXL_GROUPS"]) {
+        const ws = ctx.workbook.worksheets.getItemOrNullObject(n);
+        await ctx.sync();
+        if (ws.isNullObject) continue;
+        ws.visibility = "Visible"; // very-hidden / hidden sheets must be visible before they can be deleted
+        ws.delete();
+        await ctx.sync();
+        removed.push(n);
+      }
+    });
+    return removed;
+  }
+
 
   const statusMem = new Map(); // tab -> { col, at, vals: Map(row -> [step, alert]) }
   /** Excel for the web sometimes refuses a batch while the workbook is busy (co-authors, autosave): retry twice. */
@@ -299,14 +333,15 @@
     if (!notesSupported()) return { supported: false };
     // Loading every note is the heaviest read: skip it when the alerts haven't changed (re-check every 30 min).
     const sig = JSON.stringify(issues.filter((i) => i.ref && i.ref.col && i.severity !== "info" && i.field !== "progress")
-      .map((i) => [i.ref.tab, i.ref.col, i.ref.row, i.message, i.nexl]));
+      .map((i) => [i.ref.tab, i.ref.col, i.ref.row, i.sheetText || i.message, i.nexl]));
     if (sig === lastNotesSig && Date.now() - lastNotesAt < 30 * 60000) return { supported: true, added: 0, removed: 0, skipped: true };
     lastNotesSig = sig; lastNotesAt = Date.now();
     const want = new Map(); // "tab|A1" -> text
     for (const i of issues) {
       if (!i.ref || !i.ref.col || i.severity === "info" || i.field === "progress") continue;
       const k = `${i.ref.tab}|${i.ref.col}${i.ref.row}`;
-      const line = i.nexl && i.field !== "container" ? `${i.message}. Nexl has: ${String(i.nexl).split(" | ")[0]}` : i.message;
+      const m = i.sheetText || i.message;
+      const line = i.nexl && i.field !== "container" ? `${m}. Nexl has: ${String(i.nexl).split(" | ")[0]}` : m;
       want.set(k, want.has(k) ? want.get(k) + "\n• " + line : `${NOTE_PREFIX} (${stamp}):\n• ${line}`);
     }
     const tabs = [...new Set(cfg.tabs.map((t) => t.name))];
@@ -505,5 +540,5 @@
 
   LEVEL_STYLE.ack = { fill: "#DDEBF7", font: "#1F4E79" };
 
-  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, getAutoOpenFresh, setAutoOpen, readExtras, readTabValues };
+  root.ExcelIO = { readPlanTabs, goTo, writeCheckTab, writeStatusColumns, syncNotes, fillBlanks, replaceCell, claimWriter, readAcks, writeAck, watchSelection, getAutoOpen, getAutoOpenFresh, setAutoOpen, removeLegacySheets, readExtras, readTabValues };
 })(window);

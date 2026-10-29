@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nexl Check</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=2.7.5">
+  <link rel="stylesheet" href="taskpane.css?v=2.8.0">
 </head>
 <body>
   <!-- ===== Start-up animation ===== -->
@@ -189,7 +189,9 @@
         <span class="muted small">— on the clock (:00, :05, :10…), the same for the whole team</span></label>
       <label class="check">Snooze alerts for <input type="number" id="sSnoozeMin" min="10" max="480" step="10"> min</label>
       <label class="check"><input type="checkbox" id="sStatusCols"> Show <b>NEXL STEP</b> / <b>NEXL ALERT</b> columns on the plan tabs</label>
-      <label class="check"><input type="checkbox" id="sNotes"> Add a note on cells that differ from Nexl</label>
+      <label class="check"><input type="checkbox" id="sFixedWriter"> <b>This PC</b> is the only one that updates the sheet
+        <span class="muted small">— everyone else's panel only reads. If this PC is closed for an hour, another panel takes over until it's back.</span></label>
+      <label class="check"><input type="checkbox" id="sNotes"> Add a note on cells that differ from Nexl <span class="muted small">(off by default: NEXL ALERT shows the same, and notes slow the workbook)</span></label>
       <p class="muted small" id="notesHint" hidden>Cell notes need a newer Excel version; the status columns still work.</p>
       <label class="check"><input type="checkbox" id="sWriteTab"> Keep a <b id="sTabName"></b> tab in the workbook</label>
       <label class="check"><input type="checkbox" id="sWriteInfo"> Include info items on that tab</label>
@@ -220,14 +222,14 @@
   </div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=2.7.5"></script>
-  <script src="nexl-parsers.js?v=2.7.5"></script>
-  <script src="matcher.js?v=2.7.5"></script>
-  <script src="nexl-client.js?v=2.7.5"></script>
-  <script src="wa.js?v=2.7.5"></script>
-  <script src="excel-io.js?v=2.7.5"></script>
+  <script src="config.js?v=2.8.0"></script>
+  <script src="nexl-parsers.js?v=2.8.0"></script>
+  <script src="matcher.js?v=2.8.0"></script>
+  <script src="nexl-client.js?v=2.8.0"></script>
+  <script src="wa.js?v=2.8.0"></script>
+  <script src="excel-io.js?v=2.8.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="photo-check.js?v=2.7.5"></script>
-  <script src="taskpane.js?v=2.7.5"></script>
+  <script src="photo-check.js?v=2.8.0"></script>
+  <script src="taskpane.js?v=2.8.0"></script>
 </body>
 </html>
