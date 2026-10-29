@@ -98,6 +98,9 @@
 
   /** Writes / refreshes the NEXL CHECK tab. Rewrites the list only when it changed. */
   async function writeCheckTab(cfg, issues, firstSeen, stamp) {
+    return withRetry(() => writeCheckTabOnce(cfg, issues, firstSeen, stamp));
+  }
+  async function writeCheckTabOnce(cfg, issues, firstSeen, stamp) {
     const list = issues;
     const sig = JSON.stringify(list.map((i) => [i.severity, i.ref && i.ref.tab, i.ref && i.ref.row, i.field, i.sheet, i.nexl, i.message]));
     await Excel.run(async (ctx) => {
@@ -210,7 +213,27 @@
   }
 
   const statusMem = new Map(); // tab -> { col, at, vals: Map(row -> [step, alert]) }
+  /** Excel for the web sometimes refuses a batch while the workbook is busy (co-authors, autosave): retry twice. */
+  const BUSY = /InternalError|GeneralException|Conflict|ActivityLimitReached|ServiceNotAvailable|RequestAborted|Timeout/i;
+  async function withRetry(fn) {
+    for (let k = 0; ; k++) {
+      try { return await fn(); }
+      catch (e) {
+        if (k >= 2 || !BUSY.test(String(e.code || e.name || e.message))) {
+          const loc = e.debugInfo && (e.debugInfo.errorLocation || e.debugInfo.code);
+          if (e.code && !String(e.message || "").includes(e.code)) e.message = `${e.message} [${e.code}${loc ? " at " + loc : ""}]`;
+          throw e;
+        }
+        await new Promise((r) => setTimeout(r, 1500 * (k + 1)));
+      }
+    }
+  }
+
   async function writeStatusColumns(cfg, rowStatus) {
+    // a failed attempt may have remembered values it never wrote: forget them so the retry writes every row again
+    return withRetry(() => writeStatusColumnsOnce(cfg, rowStatus).catch((e) => { statusMem.clear(); throw e; }));
+  }
+  async function writeStatusColumnsOnce(cfg, rowStatus) {
     const byTab = new Map();
     for (const r of rowStatus) { if (!byTab.has(r.tab)) byTab.set(r.tab, []); byTab.get(r.tab).push(r); }
     let written = 0;
@@ -247,13 +270,14 @@
           const want = [r.step || "", r.alert || ""];
           if (old[0] === want[0] && old[1] === want[1]) continue;
           const rng = ws.getRangeByIndexes(r.row - 1, c, 1, 2);
-          rng.values = [want];
+          rng.values = [want.map(safe)];
           mem.vals.set(r.row, want);
           const a = ws.getRangeByIndexes(r.row - 1, c + 1, 1, 1);
           const st = LEVEL_STYLE[r.level];
           if (st) { a.format.fill.color = st.fill; a.format.font.color = st.font; }
           else { a.format.fill.clear(); a.format.font.color = "#000000"; }
           written++;
+          if (written % 120 === 0) await ctx.sync(); // smaller requests: less likely to be refused
         }
         if (created) { // only size the columns the first time, so people can resize them
           ws.getRangeByIndexes(0, c, 1, 1).format.columnWidth = 260;

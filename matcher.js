@@ -392,6 +392,12 @@
           if ((instrById.get(id) || instrById.get(b) || {}).state === "Planned" && !pool.some((n) => n.key && !/^PENDING/.test(n.key)) && !(nexlByContainer.get(key) || []).length) continue;
           const elsewhere = (nexlByContainer.get(key) || [])[0];
           const searched = search[key];
+          // IMPORTS: the container is only expected in Nexl once its port booking time has passed (checked first,
+          // so "not captured yet" also waits for the booking).
+          if (!elsewhere && tab.waitFor && col[tab.waitFor] !== undefined) {
+            const bt = bookingTime(r.values[col[tab.waitFor]], now);
+            if (!bt || now < bt) continue; // not booked yet, or booking still to come
+          }
           if (!elsewhere && !(searched && searched.length) && ownPend.length && !ownReal.length) {
             // Not in Nexl yet, and this leg only has PENDING slots: driver allocated -> 15 min to capture it in the app;
             // not allocated yet -> nothing to flag.
@@ -401,11 +407,6 @@
             entry.notInNexl = true;
             stats.notInNexl++;
             continue;
-          }
-          // IMPORTS: the container is only expected in Nexl once its port booking time has passed.
-          if (!elsewhere && tab.waitFor && col[tab.waitFor] !== undefined) {
-            const bt = bookingTime(r.values[col[tab.waitFor]], now);
-            if (!bt || now < bt) continue; // not booked yet, or booking still to come
           }
           if (elsewhere) {
             add("error", "instruction", id, elsewhere.instruction, `Nexl has this container on instruction ${elsewhere.instruction}`);
