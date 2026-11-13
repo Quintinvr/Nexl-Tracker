@@ -86,7 +86,7 @@
       for (const x of parts.slice(1)) refs.push(parts[0].slice(0, parts[0].length - x.length) + x);
       refs.push(parts[0]);
     }
-    return refs.filter((x) => x.replace(/[^A-Za-z0-9]/g, "").length >= 4 && !/^TBA$/i.test(x));
+    return refs.filter((x) => x.replace(/[^A-Za-z0-9]/g, "").length >= 2 && !/^(TBA|TBC|N\/?A)$/i.test(x)); // short refs (SL2) are kept; the matcher also needs the booking for them
   }
 
   /** Booking Reference cell "031CP0156501 / 26402768": the parts after the first are client refs (Reference 2). */

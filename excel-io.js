@@ -47,15 +47,17 @@
           rng.load("values");
           const refRng = hasRef ? ws.getRangeByIndexes(r, cols[keyField], n, 1) : null;
           const conRng = hasRef ? ws.getRangeByIndexes(r, cols.container, n, 1) : null;
+          const bkRng = hasRef && keyField !== "booking" && cols.booking !== undefined ? ws.getRangeByIndexes(r, cols.booking, n, 1) : null;
           if (refRng) { refRng.load("values"); conRng.load("values"); }
+          if (bkRng) bkRng.load("values");
           await ctx.sync();
-          const iv = rng.values, rv = refRng ? refRng.values : null, cv = conRng ? conRng.values : null; // read each column once
+          const iv = rng.values, rv = refRng ? refRng.values : null, cv = conRng ? conRng.values : null, bv = bkRng ? bkRng.values : null; // read each column once
           iv.forEach((v, i) => {
             const id = P.normInstr(v[0]);
             if (id && bases.has(P.baseInstr(id))) wanted.push(r + i);
             else if (rv) {
               const lr = String(rv[i][0] == null ? "" : rv[i][0]).trim();
-              if (lr && lr.replace(/[^A-Za-z0-9]/g, "").length >= 4) refRows.push({ row: r + i + 1, instr: v[0], loadRef: lr, container: cv[i][0] });
+              if (lr && lr.replace(/[^A-Za-z0-9]/g, "").length >= 2) refRows.push({ row: r + i + 1, instr: v[0], loadRef: lr, container: cv[i][0], booking: bv ? bv[i][0] : "" });
             }
           });
         }

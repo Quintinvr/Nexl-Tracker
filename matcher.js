@@ -132,7 +132,7 @@
     const map = new Map(); // refKey -> Map(base -> {instruction, base, customer, vessel, state})
     const put = (ref, info) => {
       const k = refKey(ref);
-      if (k.length < 4) return;
+      if (k.length < 2) return;
       if (!map.has(k)) map.set(k, new Map());
       const m = map.get(k);
       if (!m.has(info.base)) m.set(info.base, info);
@@ -141,15 +141,15 @@
       for (const c of list || []) {
         if (!c.ref2) continue;
         const instr = c.instruction || id, i = instrById.get(instr) || instrById.get(baseInstr(instr)) || {};
-        put(c.ref2, { instruction: baseInstr(instr), base: baseInstr(instr), customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
+        put(c.ref2, { instruction: baseInstr(instr), base: baseInstr(instr), customer: i.customer || "", vessel: i.vessel || "", state: i.state || "", booking: i.booking || "" });
       }
     }
     // Active / completed instructions show the client ref in Booking Reference ("booking / load ref").
     for (const i of nexl.instructions || []) for (const ref of root.NexlParsers.bookingRefs(i.booking))
-      put(ref, { instruction: i.base, base: i.base, customer: i.customer || "", vessel: i.vessel || "", state: i.state || "" });
+      put(ref, { instruction: i.base, base: i.base, customer: i.customer || "", vessel: i.vessel || "", state: i.state || "", booking: i.booking || "" });
     // Planned instructions (Planning board) carry the load ref on the instruction itself.
     for (const p of nexl.planning || []) for (const ref of p.loadRefs || [])
-      put(ref, { instruction: p.base, base: p.base, customer: p.customer || "", vessel: p.vessel || "", state: "Planned" });
+      put(ref, { instruction: p.base, base: p.base, customer: p.customer || "", vessel: p.vessel || "", state: "Planned", booking: p.booking || "" });
     // Booking numbers (EXPORTS P.E links rows by BOOKING NO.): every part of Nexl's Booking Reference field.
     const bookMap = new Map();
     const putBook = (ref, info) => {
@@ -209,12 +209,20 @@
     }
     const fills = [], mismatches = [], toSearch = new Map(); // ref -> {blank, row}
     let curRow = 0, curBlank = false;
-    const ask = (ref) => { const o = toSearch.get(ref); if (!o || (curBlank && !o.blank) || (curBlank === o.blank && curRow > o.row)) toSearch.set(ref, { blank: curBlank, row: curRow }); };
+    let curShort = false; // short refs are never looked up in Nexl's search
+    const ask = (ref) => { if (curShort) return; const o = toSearch.get(ref); if (!o || (curBlank && !o.blank) || (curBlank === o.blank && curRow > o.row)) toSearch.set(ref, { blank: curBlank, row: curRow }); };
     const ambiguous = [];
-    const consider = (tab, row, instr, loadRef, container, colInstr, kind = "loadRef") => {
-      if (!loadRef || refKey(loadRef).length < 4) return;
+    // Short load refs (SL2, EG1, DSI3) repeat across customers: they only count when the BOOKING REF matches too,
+    // and they're never sent to Nexl's search.
+    const bookingOk = (h, bk) => bookParts(h.booking).some((x) => refKey(x) === refKey(bk));
+    const consider = (tab, row, instr, loadRef, container, colInstr, kind = "loadRef", booking = "") => {
+      if (!loadRef || refKey(loadRef).length < 2) return;
+      const short = kind !== "booking" && refKey(loadRef).length < 5;
+      if (short && refKey(booking).length < 4) return; // no booking on the row: can't tell which SL2 it is
       curRow = row; curBlank = !instr;
       let hits = lookup(loadRef, kind);
+      if (short) hits = hits.filter((h) => bookingOk(h, booking));
+      curShort = short;
       const ck = compact(container);
       if (kind === "booking" && hits.length > 1 && ck && !/^PENDING/.test(ck)) {
         // one booking, several instructions: keep the one(s) Nexl has this container on
@@ -251,13 +259,13 @@
     for (const r of rowRecs) {
       const kf = linkBy.get(r.tab) || "loadRef";
       if (r.cols[kf] === undefined) continue;
-      consider(r.tab, r.row, r.id, clean(r.vals[r.cols[kf]]), r.container, colLetter(r.cols.instruction), kf);
+      consider(r.tab, r.row, r.id, clean(r.vals[r.cols[kf]]), r.container, colLetter(r.cols.instruction), kf, r.cols.booking !== undefined ? clean(r.vals[r.cols.booking]) : "");
     }
     // Other rows with a load ref / booking: empty instruction, or an instruction Nexl doesn't list as current
     for (const t of sheetTabs) {
       const kf = t.linkBy || "loadRef";
       if (!t.refRows || t.cols[kf] === undefined) continue;
-      for (const x of t.refRows) consider(t.name, x.row, normInstr(x.instr), clean(x.loadRef), clean(x.container), colLetter(t.cols.instruction), kf);
+      for (const x of t.refRows) consider(t.name, x.row, normInstr(x.instr), clean(x.loadRef), clean(x.container), colLetter(t.cols.instruction), kf, clean(x.booking));
     }
     // Look up empty instruction cells first, newest (lowest on the sheet) first; then the rest, newest first.
     const order = [...toSearch].sort((a, b) => (b[1].blank - a[1].blank) || (b[1].row - a[1].row)).map((x) => x[0]);
